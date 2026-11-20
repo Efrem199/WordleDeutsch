@@ -2,13 +2,21 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0d0e12" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="description" content="Wordle und Quordle auf Deutsch – mit Verlauf, Statistik und Wortbedeutungen." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d0e12'/%3E%3Crect x='3' y='3' width='12' height='12' rx='2' fill='%233fa34d'/%3E%3Crect x='17' y='3' width='12' height='12' rx='2' fill='%23d4a72c'/%3E%3Crect x='3' y='17' width='12' height='12' rx='2' fill='%233b3d46'/%3E%3Crect x='17' y='17' width='12' height='12' rx='2' fill='%233fa34d'/%3E%3C/svg%3E" />
   <title>Wordle &amp; Quordle auf Deutsch</title>
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="#menu">WORDLE <span class="brand-sub">&amp; QUORDLE</span></a>
+    <a class="brand" href="#menu" aria-label="Startseite">
+      <span class="brand-mark" aria-hidden="true"><i class="c"></i><i class="p"></i><i class="a"></i><i class="c"></i></span>
+      <span class="brand-text">Wordle <small>&amp; Quordle</small></span>
+    </a>
     <nav class="topnav" id="topnav">
       <a href="#menu">Menü</a>
       <a href="#stats">Verlauf</a>
