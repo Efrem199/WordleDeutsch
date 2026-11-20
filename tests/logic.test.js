@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const L = require("../js/logic.js");
+const dailyPool = require("../data/daily-words.json");
 const { RESULT: R } = L;
 
 test("полностью правильное слово", () => {
@@ -84,4 +85,39 @@ test("keyboardStatuses: лучший результат по всем доска
   assert.equal(st["t"], R.CORRECT);
   assert.equal(st["i"], R.ABSENT);
   assert.equal(st["s"], R.ABSENT);
+});
+
+test("цвет клавиши для отдельной доски не зависит от остальных", () => {
+  const guesses = [{
+    word: "tisch",
+    results: ["tisch", "apfel", "stuhl"].map((answer) => L.evaluateGuess("tisch", answer)),
+  }];
+  assert.equal(L.keyboardStatuses(guesses, 0).t, R.CORRECT);
+  assert.equal(L.keyboardStatuses(guesses, 1).t, R.ABSENT);
+  assert.equal(L.keyboardStatuses(guesses, 2).t, R.PRESENT);
+});
+
+test("Tagesrätsel wechselt mit Berliner Mitternacht und Sommerzeit", () => {
+  assert.equal(L.dailyDate(new Date("2026-03-29T21:59:59Z")), "2026-03-29");
+  assert.equal(L.dailyDate(new Date("2026-03-29T22:00:00Z")), "2026-03-30");
+  assert.equal(L.dailyDate(new Date("2026-10-25T22:59:59Z")), "2026-10-25");
+  assert.equal(L.dailyDate(new Date("2026-10-25T23:00:00Z")), "2026-10-26");
+});
+
+test("Tagesrätsel verwenden den veröffentlichten Vorrat in stabiler Reihenfolge", () => {
+  assert.deepEqual(L.dailyWords(dailyPool, "wordle", "2026-11-21"), ["dunst"]);
+  const today = L.dailyWords(dailyPool, "quordle", "2026-11-21");
+  assert.deepEqual(today, ["weihe", "zwang", "alibi", "hölle"]);
+  const tomorrow = L.dailyWords(dailyPool, "quordle", "2026-11-22");
+  assert.equal(new Set([...today, ...tomorrow]).size, 8);
+  assert.equal(L.dailyWords(dailyPool, "quordle", "2026-11-19").length, 4);
+});
+
+test("geteilte Tagesergebnisse enthalten nur Bewertungen und keine Buchstaben", () => {
+  const game = {
+    mode: "wordle", dailyDate: "2026-11-21", status: "won", maxAttempts: 6,
+    answers: ["dunst"], solvedAt: [2],
+    guesses: ["tisch", "dunst"].map((word) => ({ word, results: [L.evaluateGuess(word, "dunst")] })),
+  };
+  assert.equal(L.dailyShareText(game), "WordleDeutsch · Wordle · 2026-11-21\n2/6\n\n🟨⬛🟨⬛⬛\n🟩🟩🟩🟩🟩");
 });

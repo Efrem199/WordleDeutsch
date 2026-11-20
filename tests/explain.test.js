@@ -28,6 +28,26 @@ test("Tisch: HTML, Zeichenreferenzen, Fußnoten und Bedeutungsverweise", () => {
     defs: ["Möbel: Möbelstück", "um einen Tisch Bedeutung 1 versammelte Gesellschaft", "Mahlzeit"],
     lemma: null,
     image: null,
+    grammar: null,
+    audio: null,
+  });
+});
+
+test("Nominativ, mehrere Pluralformen und Aussprache aus derselben Substantiv-Sektion", () => {
+  const html = article(german, noun, `
+    <table class="inflection-table">
+      <tr><th></th><th>Singular</th><th>Plural 1</th><th>Plural 2</th></tr>
+      <tr><th>Nominativ</th><td>der Atlas</td><td>die Atlanten</td><td>die Atlasse</td></tr>
+      <tr><th>Genitiv</th><td>des Atlas</td><td>der Atlanten</td><td>der Atlasse</td></tr>
+    </table>
+    <dl><dd><a href="/wiki/Hilfe:Hörbeispiele">Hörbeispiele:</a>
+      <a href="//upload.wikimedia.org/wikipedia/commons/3/39/De-Atlas.ogg">Anhören</a>
+    </dd></dl>`, meanings(["[1] Kartenwerk"]));
+  const entry = parseWiktionary(html);
+  assert.deepEqual(entry.grammar, { singular: "der Atlas", plurals: ["die Atlanten", "die Atlasse"] });
+  assert.deepEqual(entry.audio, {
+    url: "https://upload.wikimedia.org/wikipedia/commons/3/39/De-Atlas.ogg",
+    page: "https://de.wiktionary.org/wiki/Datei:De-Atlas.ogg",
   });
 });
 

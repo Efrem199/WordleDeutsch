@@ -1,4 +1,5 @@
 const { test, expect } = require("@playwright/test");
+const L = require("../../js/logic.js");
 
 const storageKey = "wordle-deutsch-v1";
 const quorum = ["apfel", "fisch", "stuhl", "tiger"];
@@ -15,6 +16,7 @@ function save(page) {
 
 function seedFinishedWordle(page, word) {
   return page.addInitScript(({ key, word }) => {
+    if (localStorage.getItem(key)) return;
     localStorage.setItem(key, JSON.stringify({
       version: 1, used: [word], games: [{
         id: "finished", mode: "wordle", status: "won", startedAt: new Date().toISOString(),
@@ -59,6 +61,152 @@ test("loading the dictionary cannot create an invalid game through navigation", 
   await play(page, "wordle");
   await expect(page.getByText("Versuch 1 von 6")).toBeVisible();
   expect((await save(page)).games[0].answers[0]).toMatch(/^[a-zäöüß]{5}$/);
+});
+
+test("the daily puzzle matches across profiles and resumes alongside free play", async ({ browser, context, page }) => {
+  await installExternalFixtures(context);
+  const date = new Date("2026-11-21T12:00:00Z");
+  await page.clock.setFixedTime(date);
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", { value: { writeText: async (text) => { window.copied = text; } } });
+  });
+  const openDaily = (target) => target.locator(".daily-card").filter({ hasText: "Wordle" }).click();
+  const goMenu = (target) => target.locator('.play-bar a[href="#menu"]').click();
+
+  await page.goto("/");
+  await openDaily(page);
+  await expect(page.getByText("Versuch 1 von 6")).toBeVisible();
+  const daily = (await save(page)).games[0];
+  expect(daily.answers).toEqual(["dunst"]);
+  expect(daily.dailyDate).toBe("2026-11-21");
+  await guess(page, "tisch");
+  await expect(page.getByText("Versuch 2 von 6")).toBeVisible();
+
+  await goMenu(page);
+  await play(page, "wordle");
+  await expect(page.getByText("Versuch 1 von 6")).toBeVisible();
+  const twoGames = await save(page);
+  expect(twoGames.games.map((game) => game.status)).toEqual(["playing", "playing"]);
+  expect(twoGames.used).toHaveLength(1);
+  await goMenu(page);
+  await openDaily(page);
+  await expect(page.getByText("Versuch 2 von 6")).toBeVisible();
+  await guess(page, "dunst");
+  await expect(page.getByRole("heading", { name: "Geschafft!" })).toBeVisible();
+  await page.getByRole("button", { name: "Ergebnis kopieren" }).click();
+  await expect.poll(() => page.evaluate(() => window.copied)).toContain("🟩🟩🟩🟩🟩");
+  expect(await page.evaluate(() => window.copied)).not.toMatch(/dunst|tisch/i);
+  await goMenu(page);
+  await openDaily(page);
+  await expect(page.getByRole("heading", { name: "Geschafft!" })).toBeVisible();
+  expect((await save(page)).games).toHaveLength(2);
+
+  const another = await browser.newContext({ baseURL: page.url() });
+  try {
+    const visitor = await another.newPage();
+    await visitor.clock.setFixedTime(date);
+    await visitor.goto("/");
+    await openDaily(visitor);
+    await expect(visitor.getByText("Versuch 1 von 6")).toBeVisible();
+    expect((await save(visitor)).games[0].answers).toEqual(daily.answers);
+  } finally {
+    await another.close();
+  }
+});
+
+test("Quordle keys show four independent results and mobile shows the selected board", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 900 });
+  await page.route("**/data/answers.json", (route) => route.fulfill({ json: quorum }));
+  await page.goto("/");
+  await play(page, "quordle");
+  await expect(page.locator(".board:visible")).toHaveCount(4);
+  await guess(page, "tisch");
+  await expect(page.getByText("Versuch 2 von 9")).toBeVisible();
+  const answers = (await save(page)).games[0].answers;
+  await expect(page.locator('[data-key="t"] .key-sectors i')).toHaveClass(
+    answers.map((word) => L.evaluateGuess("tisch", word)[0]));
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator(".board:visible")).toHaveCount(1);
+  await page.locator('.play-pick [data-board-pick="2"]').click();
+  await expect(page.locator('[data-board="2"]')).toBeVisible();
+  await expect(page.locator('[data-board="0"]')).toBeHidden();
+  await guess(page, "lerne");
+  await expect(page.getByText("Versuch 3 von 9")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
+test("free play works when the daily word list is unavailable", async ({ page }) => {
+  await page.route("**/data/daily-words.json", (route) => route.fulfill({ status: 503 }));
+  await page.goto("/");
+  await expect(page.locator(".daily-card").first()).toBeDisabled();
+  await expect(page.getByText("Das Tagesrätsel konnte nicht geladen werden.")).toBeVisible();
+  await play(page, "wordle");
+  await expect(page.getByText("Versuch 1 von 6")).toBeVisible();
+});
+
+test("word cards show grammar, play the recording, and remember the word after reload", async ({ page }) => {
+  const audio = "https://upload.wikimedia.org/wikipedia/commons/e/e9/De-Tisch.ogg";
+  await seedFinishedWordle(page, "tisch");
+  await page.addInitScript(() => {
+    window.Audio = class {
+      constructor(url) { this.url = url; }
+      pause() {}
+      play() { window.audioPlayed = this.url; return Promise.resolve(); }
+    };
+  });
+  await page.route("https://de.wikipedia.org/**", (route) => route.fulfill({ json: { query: { pages: [{ missing: true }] } } }));
+  await page.route("https://de.wiktionary.org/w/api.php?**", (route) => route.fulfill({
+    json: { parse: { title: "Tisch", text: `
+      <div class="mw-parser-output">
+        <h2>Tisch (<a href="/wiki/Wiktionary:Deutsch">Deutsch</a>)</h2>
+        <h3><a href="/wiki/Hilfe:Wortart#Substantiv">Substantiv</a></h3>
+        <table class="inflection-table"><tr><th></th><th>Singular</th><th>Plural</th></tr>
+          <tr><th>Nominativ</th><td>der Tisch</td><td>die Tische</td></tr></table>
+        <dl><dd><a href="/wiki/Hilfe:Hörbeispiele">Hörbeispiele:</a><a href="${audio}">Audio</a></dd></dl>
+        <p>Bedeutungen:</p><dl><dd>[1] Möbelstück</dd></dl>
+      </div>` } },
+  }));
+  await page.goto("/#play");
+  await expect(page.getByRole("heading", { name: "der Tisch" })).toBeVisible();
+  await expect(page.getByText("Plural: die Tische")).toBeVisible();
+  await page.getByRole("button", { name: "der Tisch anhören" }).click();
+  expect(await page.evaluate(() => window.audioPlayed)).toBe(audio);
+  await page.getByRole("button", { name: "Merken", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Gemerkt" })).toHaveAttribute("aria-pressed", "true");
+  await page.locator('.topnav a[href="#vocab"]').click();
+  await page.reload();
+  await page.locator(".vocab-entry summary").click();
+  await expect(page.getByRole("heading", { name: "der Tisch" })).toBeVisible();
+  expect((await save(page)).savedWords).toEqual(["tisch"]);
+  await page.getByRole("button", { name: "Gemerkt" }).click();
+  await expect(page.locator(".vocab-entry")).toHaveCount(0);
+});
+
+test("a legacy completed Quordle can be replayed by attempt and by board", async ({ page }) => {
+  const answers = ["apfel", "tisch", "stuhl", "tiger"];
+  const solvedAt = [2, 1, null, null];
+  const guesses = ["tisch", "apfel", "lerne"].map((word, index) => ({
+    word, results: answers.map((answer, board) => {
+      return solvedAt[board] !== null && index >= solvedAt[board] ? null : L.evaluateGuess(word, answer);
+    }),
+  }));
+  await page.addInitScript(({ key, answers, solvedAt, guesses }) => {
+    localStorage.setItem(key, JSON.stringify({ version: 1, used: answers, games: [{
+      id: "past", mode: "quordle", status: "lost", startedAt: new Date().toISOString(),
+      maxAttempts: 9, answers, solvedAt, guesses, progress: [],
+    }] }));
+  }, { key: storageKey, answers, solvedAt, guesses });
+  await page.goto("/#stats");
+  await page.locator(".history-entry summary").click();
+  await expect(page.locator(".replay-answer")).toHaveText("APFEL");
+  await expect(page.locator(".replay-grid .row")).toHaveCount(2);
+  await page.getByRole("button", { name: "‹ Zurück" }).click();
+  await expect(page.locator(".replay-grid .row")).toHaveCount(1);
+  await page.locator('.replay-pick [data-board-pick="2"]').click();
+  await expect(page.locator(".replay-answer")).toHaveText("STUHL");
+  await expect(page.locator(".replay-grid .row")).toHaveCount(3);
+  await expect(page.locator(".replay-grid .tile.present").first()).toBeVisible();
 });
 
 test("invalid word lists leave the game unavailable but keep rules and history accessible", async ({ page }) => {
