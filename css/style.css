@@ -540,3 +540,9 @@ tr.ex-row td { border-bottom: 1px solid var(--border); padding: 4px 8px 14px; }
   tr.ex-row td { display: block; padding: 0; }
   tr.ex-row td::before { content: none; }
 }
+
+/* Значки Enter / Backspace: SVG масштабируется с клавишей, в том числе на телефоне */
+.key.key-icon svg { width: 24px; height: 24px; display: block; margin: 0 auto; }
+@media (max-width: 640px) {
+  .key.key-icon svg { width: 22px; height: 22px; }
+}

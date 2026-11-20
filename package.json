@@ -4,7 +4,7 @@
   "private": true,
   "description": "Wordle und Quordle auf Deutsch",
   "scripts": {
-    "test": "node --test tests/logic.test.js tests/explain.test.js",
+    "test": "node --test tests/logic.test.js tests/explain.test.js tests/data.test.js",
     "build-words": "python3 tools/build_wordlists.py $DIC $AFF $FREQ data",
     "start": "python3 -m http.server 8000 --bind 0.0.0.0"
   }

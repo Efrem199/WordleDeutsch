@@ -412,13 +412,27 @@
 
   const KEYBOARD_ROWS = L.KEYBOARD_ROWS;
 
+  /* Значки клавиш Enter и Backspace — SVG, чтобы масштабировались вместе с клавишей */
+  const ICON_ENTER =
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 10l-5 5 5 5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>' +
+    '<path d="M20 4v7a4 4 0 0 1-4 4H4" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const ICON_BACK =
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 5H9l-6 7 6 7h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>' +
+    '<path d="M12 9l5 6M17 9l-5 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>';
+
+  function keyIcon(key, label, svg, onClick) {
+    const b = el("button", { class: "key wide key-icon", "data-key": key, "aria-label": label, onclick: onClick });
+    b.innerHTML = svg;
+    return b;
+  }
+
   function buildKeyboard() {
     const kb = el("div", { class: "keyboard", id: "keyboard" });
     KEYBOARD_ROWS.forEach((keys, idx) => {
       const row = el("div", { class: "kb-row" });
-      if (idx === 2) row.appendChild(el("button", { class: "key wide", text: "↵", "data-key": "Enter", "aria-label": "Eingeben", onclick: () => handleKey("Enter") }));
+      if (idx === 2) row.appendChild(keyIcon("Enter", "Eingeben", ICON_ENTER, () => handleKey("Enter")));
       keys.forEach((k) => row.appendChild(el("button", { class: "key", text: k === "ß" ? "ẞ" : k, "data-key": k, onclick: () => handleKey(k) })));
-      if (idx === 2) row.appendChild(el("button", { class: "key wide", text: "⌫", "data-key": "Backspace", "aria-label": "Löschen", onclick: () => handleKey("Backspace") }));
+      if (idx === 2) row.appendChild(keyIcon("Backspace", "Löschen", ICON_BACK, () => handleKey("Backspace")));
       kb.appendChild(row);
     });
     return kb;
