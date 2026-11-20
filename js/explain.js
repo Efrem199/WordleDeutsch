@@ -10,16 +10,29 @@
   const MAX_DEFS = 3;
   const MAX_LEN = 280;
 
+  /** Расшифровка помет Wiktionary (Kontext-Angaben), частые в «Bedeutungen». */
+  const LABELS = {
+    "ugs.": "umgangssprachlich", "landsch.": "landschaftlich", "sonst": "sonst", "va.": "veraltet",
+    "vatd.": "veraltend", "abw.": "abwertend", "Bedva.": "veraltete Bedeutung", "derb": "derb",
+    "Jägersprache": "Jägersprache", "Zoologie": "Zoologie", "Gastronomie": "Gastronomie",
+  };
+
   /** Очистка строки вики-текста до обычного текста. */
   function cleanWiki(line) {
     let t = line;
     t = t.replace(/<!--[\s\S]*?-->/g, "");
     t = t.replace(/<ref[^>]*>[\s\S]*?<\/ref>/g, "");
     t = t.replace(/<ref[^>]*\/>/g, "");
-    // {{K|Gastronomie}}, {{K|ugs.|übertragen}} -> (Gastronomie) / (ugs., übertragen): только безымянные параметры
+    // {{K|Gastronomie}}, {{K|ugs.|übertragen}} -> (Gastronomie) / (umgangssprachlich, übertragen)
     t = t.replace(/\{\{K\|([^{}]*)\}\}/g, (m, body) => {
       const params = body.split("|").map((x) => x.trim()).filter((x) => x && x.indexOf("=") < 0);
-      return params.length ? "(" + params.join(", ") + ") " : "";
+      const labels = params.map((x) => LABELS[x] || x);
+      return labels.length ? "(" + labels.join(", ") + ") " : "";
+    });
+    // Ссылки на другие значения внутри текста: «unter [1] beschriebenen» -> «unter Bedeutung 1 beschriebenen»
+    t = t.replace(/\[(\d+(?:\s*,\s*\d+)*)\]/g, (m, nums) => {
+      const list = nums.replace(/\s+/g, "");
+      return (list.indexOf(",") >= 0 ? "Bedeutungen " : "Bedeutung ") + list.replace(/,/g, ", ");
     });
     // Прочие шаблоны (Ü, Lit, Hilfe …) убираем; вложенные — несколькими проходами
     for (let i = 0; i < 10 && /\{\{[^{}]*\}\}/.test(t); i++) t = t.replace(/\{\{[^{}]*\}\}/g, "");
