@@ -271,7 +271,7 @@
           : `${statusLabel(g.status)} · ${g.guesses.length}/${g.maxAttempts} Versuche` }),
       ]),
       playing
-        ? el("button", { class: "icon-btn danger", text: "Neu", onclick: () => newGame(g.mode) })
+        ? el("button", { class: "icon-btn", text: "Neu starten", title: "Laufendes Spiel abbrechen und neu beginnen", onclick: () => newGame(g.mode) })
         : el("button", { class: "icon-btn primary", text: "Neue Runde", onclick: () => newGame(g.mode) }),
     ]));
 
