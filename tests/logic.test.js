@@ -63,6 +63,19 @@ test("pickWords: при исчерпании пула история сбрас�
   assert.equal(words.length, 2);
 });
 
+test("pickWords: Quordle использует последнее новое слово перед повторениями", () => {
+  const pool = ["abend", "bauer", "eimer", "fisch"];
+  const { words, reset } = L.pickWords(pool, 4, pool.slice(0, 3));
+  assert.equal(reset, true);
+  assert.equal(words[0], "fisch");
+  assert.equal(new Set(words).size, 4);
+});
+
+test("pickWords: пустой или слишком маленький пул не создаёт пустых ответов", () => {
+  assert.throws(() => L.pickWords([], 1, []), RangeError);
+  assert.throws(() => L.pickWords(["abend"], 4, []), RangeError);
+});
+
 test("keyboardStatuses: лучший результат по всем доскам", () => {
   const st = L.keyboardStatuses([
     { word: "tisch", results: [[R.PRESENT, R.ABSENT, R.ABSENT, R.ABSENT, R.ABSENT], null] },

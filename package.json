@@ -3,9 +3,21 @@
   "version": "1.0.0",
   "private": true,
   "description": "Wordle und Quordle auf Deutsch",
+  "engines": {
+    "node": ">=22.18.0"
+  },
   "scripts": {
     "test": "node --test tests/logic.test.js tests/explain.test.js tests/data.test.js",
-    "build-words": "python3 tools/build_wordlists.py $DIC $AFF $FREQ data",
+    "test:browser": "playwright test",
+    "build-words": "node tools/build-wordlists.mjs",
+    "check-words": "node tools/build-wordlists.mjs --check",
     "start": "python3 -m http.server 8000 --bind 0.0.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.1",
+    "dictionary-de": "3.0.0",
+    "hunspell-asm": "4.0.2",
+    "hunspell-reader": "10.5.2",
+    "linkedom": "0.18.15"
   }
 }

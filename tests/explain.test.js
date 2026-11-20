@@ -1,109 +1,83 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { parseWiktionary } = require("../js/explain.js");
+const { parseHTML } = require("linkedom");
+const { getExplanation, parseWiktionary } = require("../js/explain.js");
 
-const SAMPLE = `{{Siehe auch|[[tisch]]}}
-== Tisch ({{Sprache|Deutsch}}) ==
-=== {{Wortart|Substantiv|Deutsch}}, {{m}} ===
-
-{{Bedeutungen}}
-:[1] {{K|Möbel}} [[Möbelstück]], das aus einer [[Platte]] mit vier oder drei [[Bein]]en besteht
-:[2] um einen Tisch [1] [[versammelt]]e [[Gesellschaft]]
-:[3] [[Mahlzeit]]
-
-{{Herkunft}}
-:von [[mittelhochdeutsch]] ''{{Ü|gmh|tisch}},''
-`;
-
-test("parseWiktionary: Wortart und Bedeutungen", () => {
-  const r = parseWiktionary(SAMPLE);
-  assert.equal(r.wortart, "Substantiv");
-  assert.equal(r.defs.length, 3);
-  assert.equal(r.defs[0], "(Möbel) Möbelstück, das aus einer Platte mit vier oder drei Beinen besteht");
-  assert.equal(r.defs[1], "um einen Tisch Bedeutung 1 versammelte Gesellschaft");
-  assert.equal(r.defs[2], "Mahlzeit");
+globalThis.document = parseHTML("<html></html>").document;
+Object.defineProperty(globalThis, "localStorage", {
+  value: { getItem: () => null, setItem: () => {} },
 });
 
-test("parseWiktionary: ohne deutsche Sektion -> leer", () => {
-  const r = parseWiktionary("== Tisch ({{Sprache|Englisch}}) ==\n{{Bedeutungen}}\n:[1] table\n");
-  assert.deepEqual(r.defs, []);
+const noun = '<h3 id="Substantiv"><a href="/wiki/Hilfe:Wortart#Substantiv">Substantiv</a>, <em>m</em></h3>';
+const german = '<div class="mw-heading mw-heading2"><h2>Wort (<a href="/wiki/Wiktionary:Deutsch">Deutsch</a>)</h2></div>';
+const meanings = (items) => '<p>Bedeutungen:</p><dl>' + items.map((text) => '<dd>' + text + '</dd>').join("") + '</dl>';
+const article = (...nodes) => '<div class="mw-parser-output">' + nodes.join("") + '</div>';
+
+// Elements reproduced from the rendered Wiktionary article Tisch, CC BY-SA 4.0.
+const tisch = article(german, '<div class="mw-heading mw-heading3">' + noun + '</div>', meanings([
+  '[1] <i>Möbel&#58;</i> <a href="/wiki/Möbelstück">Möbelstück</a><sup class="reference">[25]</sup>',
+  '[2] um einen Tisch <sup>[1]</sup> <a href="/wiki/versammelt">versammelte</a> Gesellschaft',
+  '[3] Mahlzeit',
+]));
+
+test("Tisch: HTML, Zeichenreferenzen, Fußnoten und Bedeutungsverweise", () => {
+  assert.deepEqual(parseWiktionary(tisch), {
+    wortart: "Substantiv",
+    defs: ["Möbel: Möbelstück", "um einen Tisch Bedeutung 1 versammelte Gesellschaft", "Mahlzeit"],
+    lemma: null,
+  });
 });
 
-const { findLemma } = require("../js/explain.js");
-
-// Фрагмент реальной статьи «Wurst» (de.wiktionary.org)
-const WURST = `== Wurst ({{Sprache|Deutsch}}) ==
-=== {{Wortart|Substantiv|Deutsch}}, {{f}} ===
-
-{{Bedeutungen}}
-:[1] {{K|Gastronomie}} längliches [[Fleischprodukt]]; meist eine [[Paste]] aus [[Tierfleisch]] in einen [[Tierdarm]] [[pressen|gepresst]]
-:[2] {{K|Gastronomie}} [[Aufschnitt]] aus [[Fleisch]]
-:[3] {{K|ugs.|übertragen}} [[länglich]]er, [[wurstförmig]]er [[Gegenstand]]
-
-{{Gegenwörter}}
-:[1] [[Schinken]], [[Sülze]]
-`;
-
-// Прилагательное «wurst» (egal) — в Wortart-секции, которая не должна попадать в пояснение
-const WURST_ADJ = `== wurst ({{Sprache|Deutsch}}) ==
-=== {{Wortart|Adjektiv|Deutsch}} ===
-
-{{Bedeutungen}}
-:[1] [[egal]], [[gleichgültig]]
-`;
-
-// Статья «Jacht» — только отсылка на «Yacht»
-const JACHT = `== Jacht ({{Sprache|Deutsch}}) ==
-=== {{Wortart|Substantiv|Deutsch}}, {{f}} ===
-
-{{Alternative Schreibweisen}}
-:[[Yacht]]
-
-{{Lemmaverweis|Yacht}}
-
-{{Referenzen}}
-`;
-
-test("Wurst: Substantiv-Sektion, {{K|a|b}} und Verweise", () => {
-  const r = parseWiktionary(WURST);
-  assert.equal(r.wortart, "Substantiv");
-  assert.deepEqual(r.defs, [
-    "(Gastronomie) längliches Fleischprodukt; meist eine Paste aus Tierfleisch in einen Tierdarm gepresst",
-    "(Gastronomie) Aufschnitt aus Fleisch",
-    "(umgangssprachlich, übertragen) länglicher, wurstförmiger Gegenstand",
-  ]);
+test("Bedeutungen aus anderen Sprachen und Wortarten werden übersprungen", () => {
+  const adjective = '<h3><a href="/wiki/Hilfe:Wortart#Adjektiv">Adjektiv</a></h3>';
+  const english = '<h2>Wort (<a href="/wiki/Wiktionary:Englisch">Englisch</a>)</h2>';
+  assert.deepEqual(parseWiktionary(article(german, adjective, meanings(["[1] egal"]), english, noun,
+    meanings(["[1] table"]))).defs, []);
 });
 
-test("Nur Adjektiv vorhanden -> keine Bedeutung (Wurst darf nicht zu «egal» werden)", () => {
-  const r = parseWiktionary(WURST_ADJ);
-  assert.deepEqual(r.defs, []);
-  assert.equal(r.wortart, "");
+test("verschiedene Substantiv-Abschnitte und Linkanker", () => {
+  const otherNoun = noun.replace('id="Substantiv"', 'id="Substantiv_2"');
+  const html = article(german, noun, meanings(["[1] Kartenwerk"]), otherNoun, meanings(["[1] Gewebe", "[2] Stoff"]));
+  assert.deepEqual(parseWiktionary(html).defs, ["Kartenwerk", "Gewebe", "Stoff"]);
+  assert.deepEqual(parseWiktionary(html, "Substantiv_2").defs, ["Gewebe", "Stoff"]);
 });
 
-test("Jacht: keine eigenen Bedeutungen, Verweis auf Yacht", () => {
-  assert.deepEqual(parseWiktionary(JACHT).defs, []);
-  assert.equal(findLemma(JACHT), "Yacht");
+test("Gattungsnamen haben Vorrang vor Familiennamen", () => {
+  const surname = noun.replace("</h3>", ', <a href="/wiki/Hilfe:Wortart#Nachname">Nachname</a></h3>');
+  const html = article(german, surname, meanings(["[1] Familienname"]), noun, meanings(["[1] Mediziner"]));
+  assert.deepEqual(parseWiktionary(html).defs, ["Mediziner"]);
 });
 
-// Фрагмент реальной статьи «Katze» (de.wiktionary.org): ссылки «[1]» внутри значений, помета {{K|…}}
-const KATZE = `== Katze ({{Sprache|Deutsch}}) ==
-=== {{Wortart|Substantiv|Deutsch}}, {{f}} ===
+test("Wiktionary: Jacht → Yacht und Ärzte → Arzt", async (t) => {
+  const mockPages = {
+    Jacht: article(german, noun, '<div class="lemmaverweis"><a href="/wiki/Yacht">Yacht</a></div>'),
+    Yacht: article(german, noun, meanings(["[1] Freizeit- oder Sportboot"])),
+    Ärzte: article(german, '<h3><a href="/wiki/Hilfe:Wortart#Deklinierte_Form">Deklinierte Form</a></h3>',
+      '<div><table class="grundformverweis-dekl"><tr><td><a href="/wiki/Arzt">Arzt</a></td></tr></table></div>'),
+    Arzt: article(german, noun, meanings(["[1] Mediziner"])),
+  };
+  const request = t.mock.method(globalThis, "fetch", async (url) => {
+    const page = new URL(url).searchParams.get("page");
+    return { ok: true, json: async () => ({ parse: { title: page, text: mockPages[page] } }) };
+  });
+  for (const [word, lemma, definition] of [["jacht", "Yacht", "Freizeit- oder Sportboot"], ["ärzte", "Arzt", "Mediziner"]]) {
+    const explanation = await getExplanation(word);
+    assert.equal(explanation.ok, true);
+    assert.equal(explanation.word, word);
+    assert.equal(explanation.url, "https://de.wiktionary.org/wiki/" + lemma);
+    assert.deepEqual(explanation.defs, [definition]);
+  }
+  assert.equal(request.mock.callCount(), 4);
+});
 
-{{Bedeutungen}}
-:[1] {{K|Zoologie}} in zahlreichen [[Rasse]]n [[gezüchtet]]es, dem [[Mensch]]en [[verbunden]]es, [[anschmiegsam]]es [[Haustier]] (''Felis silvestris catus'')
-:[2] [[weiblich]]es [[Exemplar]] des unter [1] beschriebenen Haustieres
-:[3] {{K|Jägersprache}} weibliches Exemplar von [[Luchs]], [[Murmeltier]], [[Wildkatze]]
-:[5] {{K|landsch.|sonst|va.}} [[klein]]es ([[flexibel|flexibles]]) [[Behältnis]] für das bei sich getragene [[Geld]]
-:[7] {{K|vatd.|t1=_|ugs.|t2=_|abw.}} (besonders [[leicht]]e; [[streitsüchtig]]e, [[zänkisch]]e) weibliche Person
-
-{{Herkunft}}
-:[1] Bei der Bezeichnung des Tieres handelt es sich um ein altes
-`;
-
-test("Katze: Bedeutungsverweise und Kontext-Angaben", () => {
-  const r = parseWiktionary(KATZE);
-  assert.equal(r.defs[0], "(Zoologie) in zahlreichen Rassen gezüchtetes, dem Menschen verbundenes, anschmiegsames Haustier (Felis silvestris catus)");
-  assert.equal(r.defs[1], "weibliches Exemplar des unter Bedeutung 1 beschriebenen Haustieres");
-  assert.equal(r.defs[2], "(Jägersprache) weibliches Exemplar von Luchs, Murmeltier, Wildkatze");
-  assert.equal(r.defs.length, 3);
+test("zirkuläre Lemmaverweise enden ohne Wiederholungen", async (t) => {
+  const request = t.mock.method(globalThis, "fetch", async (url) => {
+    const page = new URL(url).searchParams.get("page");
+    const other = page === "Jacht" ? "Yacht" : "Jacht";
+    return { ok: true, json: async () => ({ parse: { title: page,
+      text: article(german, noun, `<div class="lemmaverweis"><a href="/wiki/${other}">${other}</a></div>`),
+    } }) };
+  });
+  assert.equal((await getExplanation("jacht")).ok, false);
+  assert.equal(request.mock.callCount(), 2);
 });

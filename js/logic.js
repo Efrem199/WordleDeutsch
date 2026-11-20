@@ -39,7 +39,7 @@
 
   /** Допустимый формат слова: ровно 5 букв немецкого алфавита (a–z, ÄÖÜ, ß). */
   function isWellFormed(word) {
-    return /^[a-zäöüß]{5}$/.test(word);
+    return typeof word === "string" && /^[a-zäöüß]{5}$/.test(word);
   }
 
   /**
@@ -87,21 +87,17 @@
     return Math.floor(Math.random() * max);
   }
 
-  /**
-   * Выбирает `count` различных слов из пула, которых ещё не было (used).
-   * Если непоказанных слов не хватает, история сбрасывается и выбор идёт из всего пула.
-   * Возвращает { words, reset }.
-   */
+  /** При смене цикла сначала расходует оставшиеся слова старого пула. */
   function pickWords(pool, count, used) {
+    if (!Number.isInteger(count) || count < 1 || count > pool.length) {
+      throw new RangeError("The answer pool cannot fill the requested boards.");
+    }
     const usedSet = new Set(used || []);
     let candidates = pool.filter((w) => !usedSet.has(w));
-    let reset = false;
-    if (candidates.length < count) {
-      candidates = pool.slice();
-      reset = true;
-    }
+    const reset = candidates.length < count;
     const words = [];
     for (let i = 0; i < count; i++) {
+      if (!candidates.length) candidates = pool.filter((w) => !words.includes(w));
       const idx = randomInt(candidates.length);
       words.push(candidates[idx]);
       candidates.splice(idx, 1);

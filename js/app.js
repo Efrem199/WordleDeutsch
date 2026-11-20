@@ -14,28 +14,69 @@
 
   const app = document.getElementById("app");
   const toastEl = document.getElementById("toast");
+  const storageNotice = document.getElementById("storage-notice");
 
   let ANSWERS = [];
   let GUESS_SET = new Set();
+  let dictionaryState = "loading";
   let input = "";            // текущий ввод (не сохраняется)
   let popPending = false;    // была ли только что введена буква
   let freshRows = new Set(); // строки, которые нужно анимировать переворотом
   let freshWin = new Set();  // строки с угаданным словом (подпрыгивание)
   let toastTimer = null;
+  let submitting = false;
 
   /* ---------- Хранение ---------- */
 
-  function loadData() {
-    try {
-      const d = JSON.parse(localStorage.getItem(STORAGE_KEY));
-      if (d && Array.isArray(d.games) && Array.isArray(d.used)) return d;
-    } catch (e) { /* повреждённые данные — начинаем заново */ }
+  function emptyData() {
     return { version: 1, games: [], used: [] };
   }
-  let data = loadData();
+
+  function loadData() {
+    let stored;
+    try {
+      stored = localStorage.getItem(STORAGE_KEY);
+    } catch {
+      return null;
+    }
+    try {
+      const d = JSON.parse(stored);
+      if (d && Array.isArray(d.games) && Array.isArray(d.used)) {
+        // Versions before the loading guard could save a game with null answers.
+        d.games = d.games.filter((g) => Object.hasOwn(L.MODES, g?.mode)
+          && Array.isArray(g.answers) && g.answers.length === L.MODES[g.mode].boards
+          && g.answers.every(L.isWellFormed)
+          && Array.isArray(g.guesses) && Array.isArray(g.progress)
+          && Array.isArray(g.solvedAt) && g.solvedAt.length === g.answers.length);
+        d.used = d.used.filter(L.isWellFormed);
+        return d;
+      }
+    } catch { /* повреждённые данные — начинаем заново */ }
+    return emptyData();
+  }
+  const storedData = loadData();
+  let data = storedData || emptyData();
+  let sessionOnly = !storedData;
+  storageNotice.hidden = !sessionOnly;
 
   function saveData() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    if (sessionOnly) return;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    } catch {
+      sessionOnly = true;
+      storageNotice.hidden = false;
+    }
+  }
+
+  function updateData(change) {
+    const update = () => {
+      if (!sessionOnly) data = loadData() || data;
+      change();
+    };
+    // Reload and write under one origin-wide lock when the browser supports it.
+    if (navigator.locks) return navigator.locks.request(STORAGE_KEY, update);
+    update();
   }
 
   function playingGame() {
@@ -123,9 +164,30 @@
   /* ---------- Логика попытки ---------- */
 
   function submitGuess(game) {
-    if (input.length < L.WORD_LENGTH) return shakeRow("Zu wenig Buchstaben.");
+    if (dictionaryState !== "ready" || submitting) return;
     const word = input;
-    if (!GUESS_SET.has(word)) return shakeRow("Nicht in der Wortliste.");
+    if (word.length < L.WORD_LENGTH) return shakeRow("Zu wenig Buchstaben.");
+    submitting = true;
+    (async () => {
+      try {
+        await updateData(() => {
+          const current = playingGame();
+          if (current?.id !== game.id) {
+            input = "";
+            render();
+            return showToast("Das laufende Spiel hat sich geändert.");
+          }
+          applyGuess(current, word);
+        });
+      } finally {
+        submitting = false;
+      }
+    })();
+  }
+
+  function applyGuess(game, word) {
+    // Existing games can still be won after a word is removed from the dictionary.
+    if (!GUESS_SET.has(word) && !game.answers.includes(word)) return shakeRow("Nicht in der Wortliste.");
     if (game.guesses.some((g) => g.word === word)) return shakeRow("Dieses Wort hast du schon getippt.");
 
     const attempt = game.guesses.length + 1;
@@ -297,11 +359,19 @@
   }
 
   function newGame(mode) {
+    if (dictionaryState !== "ready") return;
     const cur = playingGame();
     if (cur && !window.confirm("Das laufende Spiel wird als abgebrochen gespeichert. Neues Spiel starten?")) return;
-    startNewGame(mode);
-    if (location.hash === "#play") render();
-    else location.hash = "#play";
+    updateData(() => {
+      if (playingGame()?.id !== cur?.id) {
+        input = "";
+        render();
+        return showToast("Das laufende Spiel hat sich geändert.");
+      }
+      startNewGame(mode);
+      if (location.hash === "#play") render();
+      else location.hash = "#play";
+    });
   }
 
   /* ---------- Игра ---------- */
@@ -320,7 +390,7 @@
       el("a", { class: "icon-btn", href: "#menu", text: "‹ Menü" }),
       el("div", { class: "play-info" }, [
         el("strong", { text: modeLabel(g.mode) }),
-        el("span", { text: playing
+        el("span", { id: "play-attempt", text: playing
           ? `Versuch ${g.guesses.length + 1} von ${g.maxAttempts}`
           : `${statusLabel(g.status)} · ${g.guesses.length}/${g.maxAttempts} Versuche` }),
       ]),
@@ -345,6 +415,7 @@
     const boards = document.getElementById("boards");
     if (!boards) return;
     const isPlaying = g.status === "playing";
+    if (isPlaying) document.getElementById("play-attempt").textContent = `Versuch ${g.guesses.length + 1} von ${g.maxAttempts}`;
     const nodes = [];
 
     g.answers.forEach((ans, b) => {
@@ -450,6 +521,7 @@
   }
 
   function handleKey(key) {
+    if (dictionaryState !== "ready" || submitting) return;
     const g = playingGame();
     if (!g) return;
     if (key === "Enter") return submitGuess(g);
@@ -502,26 +574,26 @@
   }
 
   function buildExplanation(word) {
+    const pos = el("span", { class: "pos", hidden: true });
+    const content = el("div", null, [el("span", { class: "muted small", text: "lädt Bedeutung …" })]);
     const holder = el("div", { class: "explain" }, [
       el("span", { class: "word", text: upper(word) }),
-      el("span", { class: "muted small", text: "  lädt Bedeutung …" }),
+      pos,
+      content,
     ]);
-    Promise.all([
-      EX.getExplanation(word),
-      EX.getWikiImage(word).catch(() => null),
-    ]).then(([r, img]) => {
-      holder.innerHTML = "";
-      holder.appendChild(el("span", { class: "word", text: upper(word) }));
-      if (r.wortart) holder.appendChild(el("span", { class: "pos", text: r.wortart }));
-      if (img) holder.appendChild(imageBlock(img));
+    EX.getExplanation(word).then((r) => {
+      pos.textContent = r.wortart;
+      pos.hidden = !r.wortart;
+      let definition;
       if (r.ok) {
-        const ol = el("ol");
-        r.defs.forEach((d) => ol.appendChild(el("li", { text: d })));
-        holder.appendChild(ol);
+        definition = el("ol", null, r.defs.map((d) => el("li", { text: d })));
       } else {
-        holder.appendChild(el("p", { class: "muted small", text: "Keine Bedeutung gefunden (offline oder nicht im Wiktionary)." }));
+        definition = el("p", { class: "muted small", text: "Keine Bedeutung gefunden (offline oder nicht im Wiktionary)." });
       }
-      holder.appendChild(el("a", { href: r.url, target: "_blank", rel: "noopener", text: "Wiktionary ↗" }));
+      content.replaceChildren(definition, el("a", { href: r.url, target: "_blank", rel: "noopener", text: "Wiktionary ↗" }));
+    });
+    EX.getWikiImage(word).catch(() => null).then((img) => {
+      if (img && holder.isConnected) content.before(imageBlock(img));
     });
     return holder;
   }
@@ -659,29 +731,9 @@
         g.progress.forEach((p) => {
           detailsList.appendChild(el("li", { text: `Versuch ${p.attempt}: ${p.solved} von ${g.answers.length} Wörtern gelöst (${fmtDate(p.at)})` }));
         });
-        const explBox = el("div", { class: "word-list" });
-        const exRow = el("tr", { class: "ex-row", hidden: true }, [el("td", { colspan: "5" }, [explBox])]);
-        let explBuilt = false;
-        let explOpen = false;
-        // Строка пояснений видна, только если пояснения открыты и «Verlauf» раскрыт
-        const syncExplRow = () => { exRow.hidden = !(explOpen && details.open); };
-        const explBtn = el("button", { class: "btn small", text: "Bedeutungen anzeigen" });
-        explBtn.addEventListener("click", () => {
-          if (!explBuilt) {
-            explBuilt = true;
-            g.answers.forEach((w) => explBox.appendChild(buildExplanation(w)));
-          }
-          explOpen = !explOpen;
-          explBtn.textContent = explOpen ? "Bedeutungen ausblenden" : "Bedeutungen anzeigen";
-          syncExplRow();
-        });
-        const words = el("div", { class: "muted small", text: "Wörter: " + g.answers.map((w, i) =>
-          `${upper(w)}${g.solvedAt[i] !== null ? " (Versuch " + g.solvedAt[i] + ")" : " (nicht gelöst)"}`).join(", ") });
         const details = el("details", null, [
           el("summary", { text: "Verlauf" }),
           detailsList,
-          el("div", { style: "margin-top:8px" }, [words]),
-          el("div", { style: "margin-top:8px" }, [explBtn]),
         ]);
         tbody.appendChild(el("tr", null, [
           el("td", { "data-label": "Datum", text: fmtDate(g.startedAt) }),
@@ -690,8 +742,7 @@
           el("td", { "data-label": "Gelöst", text: `${solved}/${g.answers.length} · ${g.guesses.length}/${g.maxAttempts}` }),
           el("td", { "data-label": "Details" }, [details]),
         ]));
-        details.addEventListener("toggle", syncExplRow);
-        tbody.appendChild(exRow);
+        if (g.status !== "playing") tbody.appendChild(addHistoryAnswers(details, g));
       });
       wrap.appendChild(el("div", { class: "table-wrap" }, [
         el("table", null, [
@@ -708,15 +759,40 @@
         text: "Alle Daten löschen",
         onclick: () => {
           if (window.confirm("Alle gespeicherten Spiele und Statistiken wirklich löschen?")) {
-            data = { version: 1, games: [], used: [] };
-            saveData();
-            showToast("Daten gelöscht.");
-            render();
+            updateData(() => {
+              data = emptyData();
+              input = "";
+              saveData();
+              showToast("Daten gelöscht.");
+              render();
+            });
           }
         },
       }),
     ]));
     setView(wrap);
+  }
+
+  function addHistoryAnswers(details, game) {
+    const explBox = el("div", { class: "word-list" });
+    const exRow = el("tr", { class: "ex-row", hidden: true }, [el("td", { colspan: "5" }, [explBox])]);
+    let explOpen = false;
+    const syncExplRow = () => { exRow.hidden = !(explOpen && details.open); };
+    const explBtn = el("button", { class: "btn small", text: "Bedeutungen anzeigen" });
+    explBtn.addEventListener("click", () => {
+      if (!explBox.hasChildNodes()) game.answers.forEach((w) => explBox.appendChild(buildExplanation(w)));
+      explOpen = !explOpen;
+      explBtn.textContent = explOpen ? "Bedeutungen ausblenden" : "Bedeutungen anzeigen";
+      syncExplRow();
+    });
+    const words = game.answers.map((w, i) =>
+      game.solvedAt[i] !== null ? `${upper(w)} (Versuch ${game.solvedAt[i]})` : `${upper(w)} (nicht gelöst)`);
+    details.append(
+      el("div", { class: "muted small", style: "margin-top:8px", text: "Wörter: " + words.join(", ") }),
+      el("div", { style: "margin-top:8px" }, [explBtn]),
+    );
+    details.addEventListener("toggle", syncExplRow);
+    return exRow;
   }
 
   /* ---------- Regeln ---------- */
@@ -733,7 +809,7 @@
         sw("p", "Gelb: der Buchstabe kommt im Wort vor, aber an einer anderen Stelle."),
         sw("a", "Grau: der Buchstabe kommt im Wort nicht vor."),
       ]),
-      el("p", { class: "muted", text: "Nur echte Wörter aus dem Wörterbuch sind erlaubt. ÄÖÜ sind eigene Buchstaben; ß kommt nicht vor." }),
+      el("p", { class: "muted", text: "Nur Wörter aus der Wortliste sind erlaubt. Ä, Ö, Ü und ß sind eigene Buchstaben." }),
       el("p", { class: "muted", text: "Am Ende siehst du die Lösung und ihre Bedeutung. Alle Spiele und Versuche werden im Verlauf gespeichert." }),
       el("div", { class: "btn-row" }, [el("a", { class: "btn primary", href: "#menu", text: "Zum Menü" })]),
     ]);
@@ -743,41 +819,69 @@
   /* ---------- Маршрутизация ---------- */
 
   function render() {
-    data = loadData();
     const h = (location.hash || "#menu").replace("#", "");
     document.querySelectorAll(".topnav a").forEach((a) => a.classList.toggle("active", a.getAttribute("href") === "#" + h));
-    if (h === "play") return renderPlay();
     if (h === "stats") return renderStats();
     if (h === "rules") return renderRules();
+    if (dictionaryState !== "ready") {
+      document.body.classList.remove("is-play");
+      const text = dictionaryState === "loading"
+        ? "Wörterbuch wird geladen …"
+        : "Die Wortliste konnte nicht geladen werden. Bitte lade die Seite neu.";
+      return setView(el("p", { class: "loading", role: "status", text }));
+    }
+    if (h === "play") return renderPlay();
     return renderMenu();
   }
 
   document.addEventListener("keydown", (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
-    if ((location.hash || "").replace("#", "") !== "play") return;
+    if (dictionaryState !== "ready" || location.hash !== "#play") return;
     const g = playingGame();
     if (!g) return;
     if (e.key === "Enter") { e.preventDefault(); return handleKey("Enter"); }
     if (e.key === "Backspace") { e.preventDefault(); return handleKey("Backspace"); }
-    if (/^[a-zA-ZäöüÄÖÜß]$/.test(e.key)) { e.preventDefault(); handleKey(e.key); }
+    if (/^[a-zA-ZäöüÄÖÜßẞ]$/.test(e.key)) { e.preventDefault(); handleKey(e.key); }
   });
 
   window.addEventListener("hashchange", render);
+  window.addEventListener("storage", (event) => {
+    if (sessionOnly || (event.key !== STORAGE_KEY && event.key !== null)) return;
+    const latest = loadData();
+    if (!latest) return;
+    const currentId = playingGame()?.id;
+    data = latest;
+    if (currentId !== playingGame()?.id) input = "";
+    render();
+  });
 
   /* ---------- Старт ---------- */
 
   async function init() {
+    const loadWords = async (file) => {
+      const response = await fetch(file);
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      const list = await response.json();
+      if (!Array.isArray(list) || !list.every(L.isWellFormed) || new Set(list).size !== list.length) {
+        throw new Error("Invalid word list: " + file);
+      }
+      return list;
+    };
+    render();
     try {
       const [answers, guesses] = await Promise.all([
-        fetch("data/answers.json").then((r) => r.json()),
-        fetch("data/guesses.json").then((r) => r.json()),
+        loadWords("data/answers.json"),
+        loadWords("data/guesses.json"),
       ]);
+      const guessSet = new Set(guesses);
+      if (answers.length < L.MODES.quordle.boards || !answers.every((word) => guessSet.has(word))) {
+        throw new Error("The answer list is incomplete.");
+      }
       ANSWERS = answers;
-      GUESS_SET = new Set(guesses);
-    } catch (e) {
-      app.innerHTML = "";
-      app.appendChild(el("p", { class: "card", text: "Die Wortliste konnte nicht geladen werden. Bitte lade die Seite neu." }));
-      return;
+      GUESS_SET = guessSet;
+      dictionaryState = "ready";
+    } catch {
+      dictionaryState = "error";
     }
     render();
   }
