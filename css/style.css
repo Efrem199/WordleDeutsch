@@ -115,7 +115,7 @@ p { line-height: 1.55; margin: 8px 0; }
 .icon-btn.danger { color: #ff8b8e; border-color: rgba(229,72,77,.5); background: transparent; }
 
 /* ---------- Главное меню ---------- */
-.view-menu { display: flex; flex-direction: column; gap: 14px; padding-top: 8px; }
+.view-menu { display: flex; flex-direction: column; gap: 16px; margin: auto 0; padding: 8px 0 24px; }
 .hero { text-align: center; padding: 14px 0 4px; }
 .hero-tiles { display: flex; justify-content: center; gap: 6px; margin-bottom: 14px; }
 .hero-tile {
@@ -152,7 +152,22 @@ p { line-height: 1.55; margin: 8px 0; }
   border-color: rgba(76,143,240,.55); background: linear-gradient(120deg, rgba(76,143,240,.16), var(--surface));
   margin: 0;
 }
-.continue .t { font-weight: 800; }
+.continue, .continue:hover, .continue * { text-decoration: none; color: var(--text); }
+.continue .t { font-weight: 800; font-size: 16px; }
+.continue .muted { color: var(--muted); margin-top: 2px; }
+.continue .btn.primary { color: #fff; min-height: 42px; flex: none; }
+.continue:hover { border-color: rgba(76,143,240,.85); }
+
+/* Мини-превью режимов */
+.mini { display: flex; align-items: center; height: 46px; margin-bottom: 8px; }
+.mini-row { gap: 4px; }
+.mini-quad { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.mq { display: flex; gap: 2px; }
+.mt { display: block; width: 18px; height: 18px; border-radius: 5px; background: #3a3d48; flex: none; }
+.mt.c { background: var(--correct); }
+.mt.p { background: var(--present); }
+.mt.a { background: #3a3d48; }
+.mini-quad .mt { width: 9px; height: 9px; border-radius: 2px; }
 .secondary { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
 .chip {
   padding: 10px 16px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface);
@@ -311,7 +326,11 @@ details summary { cursor: pointer; color: #8ec5ff; font-weight: 600; }
   .topnav a { padding: 8px 7px; font-size: 13px; }
   .brand-text small { display: none; }
   .mode-grid { grid-template-columns: 1fr; }
-  .mode-card { min-height: 0; flex-direction: row; align-items: center; gap: 14px; }
+  .mode-card { min-height: 0; flex-direction: row; align-items: center; gap: 16px; }
+  .mode-card .mini { margin: 0; flex: none; height: auto; }
+  .mode-card .mini-row { gap: 3px; }
+  .mode-card .mt { width: 14px; height: 14px; border-radius: 4px; }
+  .mode-card .mini-quad .mt { width: 7px; height: 7px; }
   .mode-card .mode-body { display: flex; flex-direction: column; gap: 2px; }
   .mode-card .mode-meta { margin: 0; }
   .stat-grid { grid-template-columns: 1fr 1fr; }

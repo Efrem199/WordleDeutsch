@@ -197,13 +197,23 @@
     ]);
   }
 
-  function modeCard(mode, title, desc, meta, icon, primary) {
-    const icons = el("div", { class: "mode-icons" }, [el("i", { class: "c" }), el("i", { class: "p" }), el("i", { class: "a" })]);
+  /* Мини-превью режима: одна строка плиток (Wordle) или четыре мини-доски (Quordle) */
+  function modePreview(mode) {
+    if (mode === "wordle") {
+      return el("div", { class: "mini mini-row", "aria-hidden": "true" },
+        ["c", "p", "a", "a", "c"].map((c) => el("i", { class: "mt " + c })));
+    }
+    const boards = [["c", "p", "a"], ["a", "c", "a"], ["p", "a", "c"], ["a", "a", "p"]];
+    return el("div", { class: "mini mini-quad", "aria-hidden": "true" },
+      boards.map((row) => el("div", { class: "mq" }, row.map((c) => el("i", { class: "mt " + c })))));
+  }
+
+  function modeCard(mode, title, desc, meta, primary) {
     return el("button", {
       class: "mode-card" + (primary ? " primary" : ""),
       onclick: () => newGame(mode),
     }, [
-      icons,
+      modePreview(mode),
       el("div", { class: "mode-body" }, [
         el("div", { class: "mode-title", text: title }),
         el("div", { class: "mode-desc", text: desc }),
@@ -220,7 +230,7 @@
 
     if (cur) {
       const solved = cur.solvedAt.filter((x) => x !== null).length;
-      wrap.appendChild(el("a", { class: "card continue", href: "#play" }, [
+      wrap.appendChild(el("a", { class: "card continue", href: "#play", "aria-label": "Laufendes Spiel fortsetzen" }, [
         el("div", null, [
           el("div", { class: "t", text: "Laufendes Spiel fortsetzen" }),
           el("div", { class: "muted small", text: `${modeLabel(cur.mode)} · Versuch ${cur.guesses.length + 1}/${cur.maxAttempts} · ${solved}/${cur.answers.length} gelöst` }),
@@ -230,8 +240,8 @@
     }
 
     wrap.appendChild(el("div", { class: "mode-grid" }, [
-      modeCard("wordle", "Wordle", "Ein Wort in 6 Versuchen.", "1 Wort · 6 Versuche", null, !cur),
-      modeCard("quordle", "Quordle", "Vier Wörter gleichzeitig in 9 Versuchen.", "4 Wörter · 9 Versuche", null, false),
+      modeCard("wordle", "Wordle", "Ein Wort in 6 Versuchen.", "1 Wort · 6 Versuche", !cur),
+      modeCard("quordle", "Quordle", "Vier Wörter gleichzeitig in 9 Versuchen.", "4 Wörter · 9 Versuche", false),
     ]));
 
     wrap.appendChild(el("div", { class: "secondary" }, [
