@@ -104,6 +104,14 @@ test("Tagesrätsel wechselt mit Berliner Mitternacht und Sommerzeit", () => {
   assert.equal(L.dailyDate(new Date("2026-10-25T23:00:00Z")), "2026-10-26");
 });
 
+test("nächster Rätselwechsel liegt auch an Zeitumstellungstagen um Mitternacht", () => {
+  assert.equal(L.nextDailyReset(new Date("2026-11-20T21:47:57Z")).toISOString(), "2026-11-20T23:00:00.000Z");
+  assert.equal(L.nextDailyReset(new Date("2026-03-28T12:00:00Z")).toISOString(), "2026-03-28T23:00:00.000Z");
+  assert.equal(L.nextDailyReset(new Date("2026-03-29T12:00:00Z")).toISOString(), "2026-03-29T22:00:00.000Z");
+  assert.equal(L.nextDailyReset(new Date("2026-10-24T12:00:00Z")).toISOString(), "2026-10-24T22:00:00.000Z");
+  assert.equal(L.nextDailyReset(new Date("2026-10-25T12:00:00Z")).toISOString(), "2026-10-25T23:00:00.000Z");
+});
+
 test("Tagesrätsel verwenden den veröffentlichten Vorrat in stabiler Reihenfolge", () => {
   assert.deepEqual(L.dailyWords(dailyPool, "wordle", "2026-11-21"), ["dunst"]);
   const today = L.dailyWords(dailyPool, "quordle", "2026-11-21");

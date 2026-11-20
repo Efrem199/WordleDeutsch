@@ -185,6 +185,44 @@ test("floating background letters respect reduced motion and never capture click
   await expect(page.getByText("Versuch 1 von 6")).toBeVisible();
 });
 
+test("the menu animates WORDLE on entry, including when daily puzzles load slowly", async ({ page }) => {
+  let unblock;
+  const gate = new Promise((resolve) => { unblock = resolve; });
+  await page.route("**/data/daily-words.json", async (route) => {
+    await gate;
+    await route.continue();
+  });
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  const tiles = page.locator(".hero-tiles span");
+  await expect(tiles).toHaveCount(6);
+  await expect(tiles.first()).toHaveCSS("animation-name", "enter-letter");
+  await expect(tiles.last()).toHaveCSS("animation-delay", "0.275s");
+  unblock();
+  await expect(page.locator(".daily-card").first()).toBeEnabled();
+  await expect(tiles.first()).toHaveCSS("animation-name", "enter-letter");
+
+  await play(page, "wordle");
+  await page.locator('.play-bar a[href="#menu"]').click();
+  await expect(tiles.first()).toHaveCSS("animation-name", "enter-letter");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(tiles.first()).toHaveCSS("animation-name", "none");
+});
+
+test("the daily label distinguishes the Berlin date from the user's next reset time", async ({ browser, baseURL }) => {
+  const context = await browser.newContext({ baseURL, timezoneId: "Europe/Moscow" });
+  try {
+    const page = await context.newPage();
+    await page.clock.setFixedTime(new Date("2026-11-20T21:47:57Z"));
+    await page.goto("/");
+    await expect(page.locator(".daily-panel .section-head time")).toHaveText("20. November · Berlin");
+    const reset = page.locator(".daily-reset time");
+    await expect(reset).toHaveAttribute("datetime", "2026-11-20T23:00:00.000Z");
+    await expect(reset).toContainText("02:00");
+  } finally {
+    await context.close();
+  }
+});
+
 test("a small touch screen can reach the centered footer, play, and open a replay", async ({ browser, baseURL }) => {
   const context = await browser.newContext({
     baseURL, isMobile: true, hasTouch: true, viewport: { width: 320, height: 568 },

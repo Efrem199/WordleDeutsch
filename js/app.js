@@ -302,35 +302,78 @@
   }
 
   let menuDay = "";
+  const dailyDateLabel = new Intl.DateTimeFormat("de-DE", {
+    timeZone: L.DAILY_TIME_ZONE, day: "numeric", month: "long",
+  });
+  const localResetLabel = new Intl.DateTimeFormat("de-DE", {
+    day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  });
+  function dailyPanel(date, now) {
+    const reset = L.nextDailyReset(now);
+    return el("section", { class: "daily-panel", "aria-labelledby": "today-title" }, [
+      el("div", { class: "section-head" }, [
+        el("h2", { id: "today-title", text: "Tagesrätsel" }),
+        el("time", { datetime: date, text: dailyDateLabel.format(new Date(date + "T12:00:00Z")) + " · Berlin" }),
+      ]),
+      el("div", { class: "mode-grid" }, [modeCard("wordle", true, date), modeCard("quordle", true, date)]),
+      dailyState === "error" ? el("p", { class: "muted", text: "Das Tagesrätsel konnte nicht geladen werden." }) : null,
+      el("p", { class: "daily-reset muted" }, [
+        "Nächster Wechsel · ",
+        el("time", { datetime: reset.toISOString(), text: localResetLabel.format(reset) }),
+        " (Ortszeit)",
+      ]),
+    ]);
+  }
+
+  function menuProgress() {
+    const finished = data.games.filter((game) => game.status === "won" || game.status === "lost");
+    const last = finished.reduce((latest, game) =>
+      !latest || (game.finishedAt || game.startedAt) >= (latest.finishedAt || latest.startedAt) ? game : latest, null);
+    const saved = data.savedWords.length;
+    const link = (title, description, href) => el("a", { class: "progress-link", href }, [
+      el("span", { class: "progress-link-copy" }, [
+        el("strong", { text: title }), el("span", { class: "muted", text: description }),
+      ]),
+      el("span", { "aria-hidden": "true", text: "›" }),
+    ]);
+    return el("aside", { class: "menu-progress", "aria-labelledby": "progress-title" }, [
+      el("h2", { id: "progress-title", text: "Dein Spielstand" }),
+      last ? link("Letzte Partie", `${modeLabel(last.mode)} · ${statusLabel(last.status)} · ${last.guesses.length}/${last.maxAttempts}`, playUrl(last))
+        : el("p", { class: "menu-progress-empty muted", text: "Deine letzte Partie erscheint hier, sobald du eine Runde beendet hast." }),
+      link("Wortschatz", `${saved} ${saved === 1 ? "gemerktes Wort" : "gemerkte Wörter"}`, "#vocab"),
+      link("Verlauf", `${finished.length} ${finished.length === 1 ? "beendete Partie" : "beendete Partien"}`, "#stats"),
+    ]);
+  }
+
   function renderMenu() {
     document.body.classList.remove("is-play");
+    const entering = !app.querySelector(".view-menu");
     const cur = randomGame();
-    const date = menuDay = L.dailyDate();
-    const longDate = new Intl.DateTimeFormat("de-DE", {
-      timeZone: "Europe/Berlin", weekday: "long", day: "numeric", month: "long",
-    }).format(new Date(date + "T12:00:00Z"));
+    const now = new Date();
+    const date = menuDay = L.dailyDate(now);
     const wrap = el("div", { class: "view view-menu" });
     wrap.append(
       el("section", { class: "hero" }, [
-        el("div", { class: "hero-tiles", "aria-hidden": "true" },
-          [..."WORDLE"].map((letter, i) => el("span", { class: ["correct", "present", "absent", "correct", "absent", "correct"][i], text: letter }))),
+        el("div", { class: entering ? "hero-tiles entering" : "hero-tiles", "aria-hidden": "true" },
+          [..."WORDLE"].map((letter, i) => el("span", {
+            class: ["correct", "present", "absent", "correct", "absent", "correct"][i],
+            style: `--tile-order: ${i}`, text: letter,
+          }))),
         el("h1", { text: "Wordle & Quordle auf Deutsch" }),
       ]),
-      el("section", { class: "free-panel", "aria-labelledby": "free-title" }, [
-        el("div", { class: "section-head" }, [el("h2", { id: "free-title", text: "Freies Spiel" })]),
-        cur ? el("a", { class: "continue", href: playUrl(cur), "aria-label": "Laufendes Spiel fortsetzen" }, [
-          el("strong", { text: `${modeLabel(cur.mode)} fortsetzen` }),
-          el("span", { class: "muted", text: `Versuch ${cur.guesses.length + 1} von ${cur.maxAttempts} ›` }),
-        ]) : null,
-        el("div", { class: "mode-grid" }, [modeCard("wordle", false), modeCard("quordle", false)]),
-      ]),
-      el("section", { class: "daily-panel", "aria-labelledby": "today-title" }, [
-        el("div", { class: "section-head" }, [
-          el("h2", { id: "today-title", text: "Heute" }),
-          el("time", { datetime: date, text: longDate }),
+      el("div", { class: "menu-layout" }, [
+        el("div", { class: "menu-modes" }, [
+          el("section", { class: "free-panel", "aria-labelledby": "free-title" }, [
+            el("div", { class: "section-head" }, [el("h2", { id: "free-title", text: "Freies Spiel" })]),
+            cur ? el("a", { class: "continue", href: playUrl(cur), "aria-label": "Laufendes Spiel fortsetzen" }, [
+              el("strong", { text: `${modeLabel(cur.mode)} fortsetzen` }),
+              el("span", { class: "muted", text: `Versuch ${cur.guesses.length + 1} von ${cur.maxAttempts} ›` }),
+            ]) : null,
+            el("div", { class: "mode-grid" }, [modeCard("wordle", false), modeCard("quordle", false)]),
+          ]),
+          dailyPanel(date, now),
         ]),
-        el("div", { class: "mode-grid" }, [modeCard("wordle", true, date), modeCard("quordle", true, date)]),
-        dailyState === "error" ? el("p", { class: "muted", text: "Das Tagesrätsel konnte nicht geladen werden." }) : null,
+        menuProgress(),
       ]),
     );
     setView(wrap);
@@ -1109,7 +1152,11 @@
       DAILY_WORDS = words;
       dailyState = "ready";
     }).catch(() => { dailyState = "error"; }).finally(() => {
-      if (dictionaryState === "ready" && (!location.hash || location.hash === "#menu")) renderMenu();
+      const panel = app.querySelector(".view-menu .daily-panel");
+      if (panel) {
+        const now = new Date();
+        panel.replaceWith(dailyPanel(L.dailyDate(now), now));
+      }
     });
     try {
       const [answers, guesses] = await Promise.all([
