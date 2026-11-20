@@ -201,11 +201,12 @@ test("a previously missing image loads from Wikimedia even when the thumbnail ho
     localStorage.setItem("wordle-deutsch-images-v2", '{"jacht":null}');
   });
   await page.goto("/#play");
+  await page.locator(".explain").scrollIntoViewIfNeeded();
+  await expect(page.locator(".ex-fig a")).toHaveAttribute("href", article);
   const thumbnail = page.getByRole("img", { name: "Jacht" });
   await thumbnail.scrollIntoViewIfNeeded();
   await expect(thumbnail).toHaveAttribute("src", "https://upload.wikimedia.org" + thumbPath);
   await expect(thumbnail).toHaveJSProperty("naturalWidth", 1);
-  await expect(page.locator(".ex-fig a")).toHaveAttribute("href", article);
 
   await page.getByRole("button", { name: "Bild vergrößern" }).click();
   const enlarged = page.getByRole("dialog").getByRole("img");
