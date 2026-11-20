@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Wordle &amp; Quordle auf Deutsch</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#menu">WORDLE <span class="brand-sub">&amp; QUORDLE</span></a>
+    <nav class="topnav" id="topnav">
+      <a href="#menu">Menü</a>
+      <a href="#stats">Verlauf</a>
+      <a href="#rules">Regeln</a>
+    </nav>
+  </header>
+
+  <main id="app">
+    <p class="loading">Wörterbuch wird geladen …</p>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <footer class="footer">
+    Wortliste: <a href="https://www.npmjs.com/package/dictionary-de" target="_blank" rel="noopener">Hunspell de_DE (igerman98)</a> ·
+    Häufigkeiten: <a href="https://github.com/hermitdave/FrequencyWords" target="_blank" rel="noopener">FrequencyWords (OpenSubtitles)</a> ·
+    Bedeutungen: <a href="https://de.wiktionary.org" target="_blank" rel="noopener">Wiktionary (CC BY-SA 4.0)</a>
+  </footer>
+
+  <script src="js/logic.js"></script>
+  <script src="js/explain.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

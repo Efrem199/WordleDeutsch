@@ -1,0 +1,131 @@
+/*
+ * Пояснения слов из немецкого Wiktionary (de.wiktionary.org), через MediaWiki API с CORS (origin=*).
+ * Результаты кэшируются в localStorage. Лицензия текстов: CC BY-SA 4.0.
+ */
+(function (root) {
+  const CACHE_KEY = "wordle-deutsch-definitions-v1";
+  const API = "https://de.wiktionary.org/w/api.php";
+
+  function cleanWiki(line) {
+    let t = line;
+    t = t.replace(/<ref[^>]*>.*?<\/ref>/gs, "");
+    t = t.replace(/<ref[^>]*\/>/g, "");
+    t = t.replace(/\{\{K\|([^}|]*)[^}]*\}\}/g, "($1) ");          // Kontext-Angabe
+    for (let i = 0; i < 10 && /\{\{[^{}]*\}\}/.test(t); i++) {    // übrige Vorlagen entfernen
+      t = t.replace(/\{\{[^{}]*\}\}/g, "");
+    }
+    for (let i = 0; i < 5 && /\[\[[^\[\]]*\]\]/.test(t); i++) {   // Links -> Text
+      t = t.replace(/\[\[(?:[^\[\]|]*\|)?([^\[\]]*)\]\]/g, "$1");
+    }
+    t = t.replace(/'{2,}/g, "");                                  // kursiv/fett
+    t = t.replace(/\[\d+(?:[,–-]\s*\d+)*\]/g, "");              // [1], [1, 2] Verweise
+    t = t.replace(/^:\s*/, "");
+    t = t.replace(/\s+/g, " ").replace(/\s+([,.;:)])/g, "$1").replace(/\(\s+/g, "(").trim();
+    return t;
+  }
+
+  /** Извлекает часть речи и первые значения из вики-текста немецкой секции. */
+  function parseWiktionary(wikitext) {
+    let text = wikitext;
+    // Ограничиваемся немецкой секцией, если она есть
+    const start = text.search(/==\s*[^=\n]+\(\{\{Sprache\|Deutsch\}\}\)\s*==/);
+    if (start >= 0) {
+      text = text.slice(start);
+      const nextLang = text.slice(10).search(/\n==\s*[^=\n]+\(\{\{Sprache\|/);
+      if (nextLang >= 0) text = text.slice(0, nextLang + 10);
+    } else if (!/Sprache\|Deutsch/.test(text)) {
+      return { wortart: "", defs: [] };
+    }
+
+    const wm = text.match(/\{\{Wortart\|([^|}]+)\|Deutsch/);
+    const wortart = wm ? wm[1] : "";
+
+    const idx = text.indexOf("{{Bedeutungen}}");
+    if (idx < 0) return { wortart, defs: [] };
+
+    const defs = [];
+    const lines = text.slice(idx).split("\n").slice(1);
+    for (const line of lines) {
+      if (!line.trim()) {
+        if (defs.length) break;
+        continue;
+      }
+      if (!line.startsWith(":[")) {
+        if (defs.length) break;
+        continue;
+      }
+      const cleaned = cleanWiki(line);
+      if (cleaned) defs.push(cleaned.length > 280 ? cleaned.slice(0, 277) + "…" : cleaned);
+      if (defs.length >= 3) break;
+    }
+    return { wortart, defs };
+  }
+
+  function loadCache() {
+    try {
+      return JSON.parse(localStorage.getItem(CACHE_KEY)) || {};
+    } catch (e) {
+      return {};
+    }
+  }
+  function saveCache(c) {
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify(c));
+    } catch (e) {
+      /* переполнение хранилища — не критично */
+    }
+  }
+
+  function pageUrl(word) {
+    return "https://de.wiktionary.org/wiki/" + encodeURIComponent(word.charAt(0).toUpperCase() + word.slice(1));
+  }
+
+  async function fetchTitle(title) {
+    const url =
+      API +
+      "?action=query&prop=revisions&rvprop=content&rvslots=main&format=json&formatversion=2&redirects=1&origin=*&titles=" +
+      encodeURIComponent(title);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const json = await res.json();
+    const page = json && json.query && json.query.pages && json.query.pages[0];
+    const content = page && page.revisions && page.revisions[0] && page.revisions[0].slots.main.content;
+    return content || "";
+  }
+
+  /**
+   * Возвращает { word, wortart, defs: string[], url, ok }.
+   * Сначала пробует слово в нижнем регистре (глаголы/прилагательные), затем с заглавной буквы (существительные).
+   */
+  async function getExplanation(word) {
+    const cache = loadCache();
+    if (cache[word]) return cache[word];
+
+    const result = { word, wortart: "", defs: [], url: pageUrl(word), ok: false };
+    const titles = [word, word.charAt(0).toUpperCase() + word.slice(1)];
+    for (const title of titles) {
+      try {
+        const content = await fetchTitle(title);
+        const parsed = parseWiktionary(content);
+        if (parsed.defs.length) {
+          result.wortart = parsed.wortart;
+          result.defs = parsed.defs;
+          result.ok = true;
+          break;
+        }
+      } catch (e) {
+        // Сеть недоступна — вернём результат без пояснения, без кэширования
+        return result;
+      }
+    }
+    if (result.ok) {
+      cache[word] = result;
+      saveCache(cache);
+    }
+    return result;
+  }
+
+  const api = { getExplanation, parseWiktionary, cleanWiki, pageUrl };
+  if (typeof module === "object" && module.exports) module.exports = api;
+  else root.WordExplain = api;
+})(typeof self !== "undefined" ? self : this);
