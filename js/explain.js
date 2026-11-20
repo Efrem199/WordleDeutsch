@@ -24,18 +24,31 @@
     return t;
   }
 
-  /** Извлекает часть речи и первые значения из вики-текста немецкой секции. */
-  function parseWiktionary(wikitext) {
+  /** Немецкая секция вики-текста (или null, если её нет). */
+  function germanSection(wikitext) {
     let text = wikitext;
-    // Ограничиваемся немецкой секцией, если она есть
     const start = text.search(/==\s*[^=\n]+\(\{\{Sprache\|Deutsch\}\}\)\s*==/);
     if (start >= 0) {
       text = text.slice(start);
       const nextLang = text.slice(10).search(/\n==\s*[^=\n]+\(\{\{Sprache\|/);
       if (nextLang >= 0) text = text.slice(0, nextLang + 10);
-    } else if (!/Sprache\|Deutsch/.test(text)) {
-      return { wortart: "", defs: [] };
+      return text;
     }
+    return /Sprache\|Deutsch/.test(text) ? text : null;
+  }
+
+  /** Если статья — только отсылка на другое слово ({{Lemmaverweis|…}}), возвращает это слово. */
+  function findLemma(wikitext) {
+    const text = germanSection(wikitext);
+    if (!text) return "";
+    const m = text.match(/\{\{Lemmaverweis\|([^|}]+)/);
+    return m ? m[1].trim() : "";
+  }
+
+  /** Извлекает часть речи и первые значения из вики-текста немецкой секции. */
+  function parseWiktionary(wikitext) {
+    const text = germanSection(wikitext);
+    if (!text) return { wortart: "", defs: [] };
 
     const wm = text.match(/\{\{Wortart\|([^|}]+)\|Deutsch/);
     const wortart = wm ? wm[1] : "";
@@ -103,10 +116,18 @@
 
     const result = { word, wortart: "", defs: [], url: pageUrl(word), ok: false };
     const titles = [word, word.charAt(0).toUpperCase() + word.slice(1)];
+    const tried = [];
     for (const title of titles) {
       try {
         const content = await fetchTitle(title);
-        const parsed = parseWiktionary(content);
+        tried.push(title);
+        let parsed = parseWiktionary(content);
+        // Отсылка на основную форму (Jacht -> Yacht): читаем её статью
+        const lemma = !parsed.defs.length && findLemma(content);
+        if (lemma && tried.indexOf(lemma) < 0) {
+          const lemmaParsed = parseWiktionary(await fetchTitle(lemma));
+          if (lemmaParsed.defs.length) parsed = lemmaParsed;
+        }
         if (parsed.defs.length) {
           result.wortart = parsed.wortart;
           result.defs = parsed.defs;

@@ -646,9 +646,11 @@
           detailsList.appendChild(el("li", { text: `Versuch ${p.attempt}: ${p.solved} von ${g.answers.length} Wörtern gelöst (${fmtDate(p.at)})` }));
         });
         const explBox = el("div", { class: "word-list" });
+        const exRow = el("tr", { class: "ex-row", hidden: true }, [el("td", { colspan: "5" }, [explBox])]);
         const explBtn = el("button", { class: "btn small", text: "Bedeutungen anzeigen" });
         explBtn.addEventListener("click", () => {
           explBtn.remove();
+          exRow.hidden = false;
           g.answers.forEach((w) => explBox.appendChild(buildExplanation(w)));
         });
         const words = el("div", { class: "muted small", text: "Wörter: " + g.answers.map((w, i) =>
@@ -658,7 +660,6 @@
           detailsList,
           el("div", { style: "margin-top:8px" }, [words]),
           el("div", { style: "margin-top:8px" }, [explBtn]),
-          explBox,
         ]);
         tbody.appendChild(el("tr", null, [
           el("td", { "data-label": "Datum", text: fmtDate(g.startedAt) }),
@@ -667,6 +668,7 @@
           el("td", { "data-label": "Gelöst", text: `${solved}/${g.answers.length} · ${g.guesses.length}/${g.maxAttempts}` }),
           el("td", { "data-label": "Details" }, [details]),
         ]));
+        tbody.appendChild(exRow);
       });
       wrap.appendChild(el("div", { class: "table-wrap" }, [
         el("table", null, [
