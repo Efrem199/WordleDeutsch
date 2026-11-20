@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { parseWiktionary } = require("../public/js/explain.js");
+const { parseWiktionary } = require("../js/explain.js");
 
 const SAMPLE = `{{Siehe auch|[[tisch]]}}
 == Tisch ({{Sprache|Deutsch}}) ==
