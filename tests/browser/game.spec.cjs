@@ -3,6 +3,7 @@ const { test, expect } = require("@playwright/test");
 const storageKey = "wordle-deutsch-v1";
 const quorum = ["apfel", "fisch", "stuhl", "tiger"];
 const words = { wordle: "Wordle", quordle: "Quordle" };
+const pixel = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=", "base64");
 
 function play(page, mode) {
   return page.locator(".mode-card").filter({ hasText: words[mode] }).click();
@@ -10,6 +11,17 @@ function play(page, mode) {
 
 function save(page) {
   return page.evaluate((key) => JSON.parse(localStorage.getItem(key)), storageKey);
+}
+
+function seedFinishedWordle(page, word) {
+  return page.addInitScript(({ key, word }) => {
+    localStorage.setItem(key, JSON.stringify({
+      version: 1, used: [word], games: [{
+        id: "finished", mode: "wordle", status: "won", startedAt: new Date().toISOString(),
+        maxAttempts: 6, answers: [word], solvedAt: [1], guesses: [], progress: [],
+      }],
+    }));
+  }, { key: storageKey, word });
 }
 
 async function guess(page, word) {
@@ -161,6 +173,16 @@ test("a previously missing image loads from Wikimedia even when the thumbnail ho
   const thumb = "https://thumb.wikimedia.org" + thumbPath;
   const full = "https://upload.wikimedia.org" + fullPath;
   const article = "https://de.wikipedia.org/wiki/Yacht";
+  const unavailable = "https://upload.wikimedia.org/wikipedia/commons/5/54/unavailable.jpg";
+  await page.route("https://de.wiktionary.org/w/api.php?**", (route) => route.fulfill({
+    json: { parse: { title: "Jacht", text: `
+      <div class="mw-parser-output">
+        <h2>Jacht (<a href="/wiki/Wiktionary:Deutsch">Deutsch</a>)</h2>
+        <h3><a href="/wiki/Hilfe:Wortart#Substantiv">Substantiv</a></h3>
+        <figure><a class="mw-file-description" href="/wiki/Datei:unavailable.jpg"><img src="${unavailable}" width="220"></a></figure>
+        <p>Bedeutungen:</p><dl><dd>[1] Segelboot</dd></dl>
+      </div>` } },
+  }));
   await page.route("https://de.wikipedia.org/w/api.php?**", (route) => {
     const title = new URL(route.request().url()).searchParams.get("titles");
     expect(title).toBe("Jacht");
@@ -170,19 +192,14 @@ test("a previously missing image loads from Wikimedia even when the thumbnail ho
     }] } } });
   });
   await page.route(thumb, (route) => route.abort("failed"));
-  const pixel = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=", "base64");
   await page.route("https://upload.wikimedia.org/**", (route) => route.fulfill({
     contentType: "image/png", body: pixel,
   }));
-  await page.addInitScript((key) => {
+  await page.route(unavailable, (route) => route.abort("failed"));
+  await seedFinishedWordle(page, "jacht");
+  await page.addInitScript(() => {
     localStorage.setItem("wordle-deutsch-images-v2", '{"jacht":null}');
-    localStorage.setItem(key, JSON.stringify({
-      version: 1, used: ["jacht"], games: [{
-        id: "old-jacht", mode: "wordle", status: "won", startedAt: new Date().toISOString(),
-        maxAttempts: 6, answers: ["jacht"], solvedAt: [1], guesses: [], progress: [],
-      }],
-    }));
-  }, storageKey);
+  });
   await page.goto("/#play");
   const thumbnail = page.getByRole("img", { name: "Jacht" });
   await thumbnail.scrollIntoViewIfNeeded();
@@ -194,6 +211,35 @@ test("a previously missing image loads from Wikimedia even when the thumbnail ho
   const enlarged = page.getByRole("dialog").getByRole("img");
   await expect(enlarged).toHaveAttribute("src", full);
   await expect(enlarged).toHaveJSProperty("naturalWidth", 1);
+});
+
+test("an article illustration needs no Wikipedia request", async ({ page }) => {
+  const asset = "https://upload.wikimedia.org/wikipedia/commons/a/ab/fish.png";
+  const file = "/wiki/Datei:fish.png";
+  const wikipediaRequests = [];
+  await page.route("https://de.wikipedia.org/**", (route) => {
+    wikipediaRequests.push(route.request().url());
+    return route.abort("failed");
+  });
+  await page.route("https://de.wiktionary.org/w/api.php?**", (route) => route.fulfill({
+    json: { parse: { title: "Fisch", text: `
+      <div class="mw-parser-output">
+        <h2>Fisch (<a href="/wiki/Wiktionary:Deutsch">Deutsch</a>)</h2>
+        <h3><a href="/wiki/Hilfe:Wortart#Substantiv">Substantiv</a></h3>
+        <figure><a class="mw-file-description" href="${file}"><img src="${asset}" width="220"></a>
+          <figcaption>[1] ein Fisch</figcaption></figure>
+        <p>Bedeutungen:</p><dl><dd>[1] Wassertier</dd></dl>
+      </div>` } },
+  }));
+  await page.route(asset, (route) => route.fulfill({ contentType: "image/png", body: pixel }));
+  await seedFinishedWordle(page, "fisch");
+  await page.goto("/#play");
+  const picture = page.getByRole("img", { name: "Fisch" });
+  await picture.scrollIntoViewIfNeeded();
+  await expect(picture).toHaveJSProperty("naturalWidth", 1);
+  await expect(page.locator(".ex-fig a")).toHaveAttribute("href", "https://de.wiktionary.org" + file);
+  await expect(page.locator(".explain li")).toHaveText("Wassertier");
+  expect(wikipediaRequests).toEqual([]);
 });
 
 test("a storage write failure still lets the player play and navigate", async ({ page }) => {

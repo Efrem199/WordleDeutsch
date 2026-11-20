@@ -581,6 +581,12 @@
       pos,
       content,
     ]);
+    const loadWikipediaImage = () => {
+      if (!holder.isConnected) return;
+      EX.getWikiImage(word).catch(() => null).then((image) => {
+        if (image && holder.isConnected) content.before(imageBlock(image));
+      });
+    };
     EX.getExplanation(word).then((r) => {
       pos.textContent = r.wortart;
       pos.hidden = !r.wortart;
@@ -591,15 +597,14 @@
         definition = el("p", { class: "muted small", text: "Keine Bedeutung gefunden (offline oder nicht im Wiktionary)." });
       }
       content.replaceChildren(definition, el("a", { href: r.url, target: "_blank", rel: "noopener", text: "Wiktionary ↗" }));
-    });
-    EX.getWikiImage(word).catch(() => null).then((img) => {
-      if (img && holder.isConnected) content.before(imageBlock(img));
+      if (r.image && holder.isConnected) content.before(imageBlock(r.image, loadWikipediaImage));
+      else loadWikipediaImage();
     });
     return holder;
   }
 
-  /* Картинка из Википедии: миниатюра, по клику — увеличенный просмотр с подписью */
-  function wikipediaImage(img, enlarged, onUnavailable) {
+  /* Миниатюра и увеличенная версия используют запасные URL Wikimedia. */
+  function wikimediaImage(img, enlarged, onUnavailable) {
     const thumb = img.thumb;
     const upload = thumb.replace(/^https:\/\/thumb\.wikimedia\.org\/wikipedia\//, "https://upload.wikimedia.org/wikipedia/");
     const candidates = [...new Set(enlarged ? [img.full, thumb, upload] : [thumb, upload, img.full])];
@@ -614,15 +619,18 @@
     return node;
   }
 
-  function imageBlock(img) {
+  function imageBlock(img, onUnavailable) {
     const figure = el("figure", { class: "ex-fig" }, [
       el("figcaption", { class: "ex-cap" }, [
         el("div", { class: "ex-cap-title", text: img.title }),
         img.description ? el("div", { class: "muted small", text: img.description }) : null,
-        el("a", { href: img.page, target: "_blank", rel: "noopener", text: "Wikipedia ↗" }),
+        el("a", { href: img.page, target: "_blank", rel: "noopener", text: (img.source || "Wikipedia") + " ↗" }),
       ]),
     ]);
-    const thumbnail = wikipediaImage(img, false, () => figure.remove());
+    const thumbnail = wikimediaImage(img, false, () => {
+      figure.remove();
+      if (onUnavailable) onUnavailable();
+    });
     figure.prepend(el("button", { class: "ex-img", type: "button", "aria-label": "Bild vergrößern",
       onclick: () => openLightbox(img) }, [thumbnail]));
     return figure;
@@ -636,7 +644,7 @@
       if (box) box.remove();
       box = null;
     }
-    const image = wikipediaImage(img, true, () => image.replaceWith(el("p", { text: "Das Bild konnte nicht geladen werden." })));
+    const image = wikimediaImage(img, true, () => image.replaceWith(el("p", { text: "Das Bild konnte nicht geladen werden." })));
     box = el("div", {
       class: "lightbox",
       role: "dialog",
@@ -650,7 +658,8 @@
         el("div", { class: "lb-caption" }, [
           el("strong", { text: img.title }),
           img.description ? el("span", { text: " – " + img.description }) : null,
-          el("div", { class: "lb-src" }, [el("a", { href: img.page, target: "_blank", rel: "noopener", text: "Quelle: Wikipedia ↗" })]),
+          el("div", { class: "lb-src" }, [el("a", { href: img.page, target: "_blank", rel: "noopener",
+            text: `Quelle: ${img.source || "Wikipedia"} ↗` })]),
         ]),
       ]),
     ]);

@@ -3,7 +3,7 @@
  * Лицензия текстов: CC BY-SA 4.0.
  */
 (function (root) {
-  const CACHE_KEY = "wordle-deutsch-definitions-v3";
+  const CACHE_KEY = "wordle-deutsch-definitions-v4";
   const API = "https://de.wiktionary.org/w/api.php";
   const WIKTIONARY = "https://de.wiktionary.org";
   const MAX_DEFS = 3;
@@ -33,6 +33,25 @@
       anchor: decodeURIComponent(url.hash.slice(1)) };
   }
 
+  function findIllustration(node) {
+    const figures = node.matches("figure") ? [node] : node.querySelectorAll("figure");
+    for (const figure of figures) {
+      const link = figure.querySelector('a.mw-file-description[href^="/wiki/Datei:"]');
+      const image = link?.querySelector("img[src]");
+      if (!image || (image.hasAttribute("width") && Number(image.getAttribute("width")) < 100)) continue;
+      const src = image.getAttribute("src");
+      if (!/^(?:https:)?\/\/(?:thumb|upload)\.wikimedia\.org\/wikipedia\//.test(src)) continue;
+      const thumb = new URL(src, WIKTIONARY);
+      const scaled = /^(\/wikipedia\/[^/]+)\/thumb\/(.+)\/[^/]+$/.exec(thumb.pathname);
+      const full = scaled ? "https://upload.wikimedia.org" + scaled[1] + "/" + scaled[2] : thumb.href;
+      const description = figure.querySelector("figcaption")?.textContent
+        .replace(/^\s*\[[\d.,– -]+\]\s*/, "").replace(/\s+/g, " ").trim() || "";
+      return { thumb: thumb.href, full, description, source: "Wiktionary",
+        page: new URL(link.getAttribute("href"), WIKTIONARY).href };
+    }
+    return null;
+  }
+
   function parseWiktionary(html, anchor = "") {
     // A template is inert. The HTML and its links are never inserted into the UI.
     const template = document.createElement("template");
@@ -50,7 +69,7 @@
       if (!german) continue;
       if (heading?.tagName === "H3") {
         const pos = [...heading.querySelectorAll(POS_LINK)].map((link) => link.textContent.trim());
-        section = { heading, pos, defs: [], lemma: null };
+        section = { heading, pos, defs: [], lemma: null, image: null };
         sections.push(section);
       } else if (section) {
         if (section.pos.includes("Substantiv") && node.matches("p") && node.textContent.trim() === "Bedeutungen:") {
@@ -60,6 +79,7 @@
           }
         }
         if (!section.lemma) section.lemma = lemmaTarget(node);
+        if (!section.image && section.pos.includes("Substantiv")) section.image = findIllustration(node);
       }
     }
 
@@ -73,7 +93,8 @@
     const commonDefs = collect(common);
     const defs = commonDefs.length ? commonDefs : collect(nouns);
     const lemma = selected.find((entry) => entry.lemma)?.lemma || null;
-    return { wortart: defs.length ? "Substantiv" : "", defs, lemma };
+    const image = (common.length ? common : nouns).find((noun) => noun.image)?.image || null;
+    return { wortart: defs.length ? "Substantiv" : "", defs, lemma, image };
   }
 
   function capitalized(word) {
@@ -121,7 +142,7 @@
     if (cached) return cached;
 
     const title = capitalized(word);
-    const result = { word, wortart: "", defs: [], url: pageUrl(title), ok: false };
+    const result = { word, wortart: "", defs: [], url: pageUrl(title), ok: false, image: null };
     const visited = new Set();
     let target = { title, anchor: "" };
     try {
@@ -133,6 +154,7 @@
         const page = await fetchTitle(target.title, signal);
         if (!page?.text) break;
         const parsed = parseWiktionary(page.text, target.anchor);
+        if (!result.image && parsed.image) result.image = { title, ...parsed.image };
         if (parsed.defs.length) {
           const explained = { ...result, wortart: parsed.wortart, defs: parsed.defs,
             url: pageUrl(page.title || target.title, target.anchor), ok: true };

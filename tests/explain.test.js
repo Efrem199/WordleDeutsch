@@ -27,6 +27,7 @@ test("Tisch: HTML, Zeichenreferenzen, Fußnoten und Bedeutungsverweise", () => {
     wortart: "Substantiv",
     defs: ["Möbel: Möbelstück", "um einen Tisch Bedeutung 1 versammelte Gesellschaft", "Mahlzeit"],
     lemma: null,
+    image: null,
   });
 });
 
@@ -48,6 +49,26 @@ test("Gattungsnamen haben Vorrang vor Familiennamen", () => {
   const surname = noun.replace("</h3>", ', <a href="/wiki/Hilfe:Wortart#Nachname">Nachname</a></h3>');
   const html = article(german, surname, meanings(["[1] Familienname"]), noun, meanings(["[1] Mediziner"]));
   assert.deepEqual(parseWiktionary(html).defs, ["Mediziner"]);
+});
+
+test("Illustrationen stammen aus dem deutschen Substantiv-Abschnitt", () => {
+  const figure = (file, width = 220) => `
+    <figure typeof="mw:File/Thumb">
+      <a href="/wiki/Datei:${file}.jpg" class="mw-file-description">
+        <img src="//thumb.wikimedia.org/wikipedia/commons/thumb/a/ab/${file}.jpg/220px-${file}.jpg" width="${width}">
+      </a>
+      <figcaption>[1] ein Fisch</figcaption>
+    </figure>`;
+  const surname = noun.replace("</h3>", ', <a href="/wiki/Hilfe:Wortart#Nachname">Nachname</a></h3>');
+  const html = article(figure("OtherLanguage"), german, surname, figure("Map"), noun, figure("Icon", 25),
+    "<table><tbody><tr><td>" + figure("Fish") + "</td></tr></tbody></table>", meanings(["[1] Wassertier"]));
+  assert.deepEqual(parseWiktionary(html).image, {
+    description: "ein Fisch",
+    thumb: "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/ab/Fish.jpg/220px-Fish.jpg",
+    full: "https://upload.wikimedia.org/wikipedia/commons/a/ab/Fish.jpg",
+    page: "https://de.wiktionary.org/wiki/Datei:Fish.jpg",
+    source: "Wiktionary",
+  });
 });
 
 test("Wiktionary: Jacht → Yacht und Ärzte → Arzt", async (t) => {
