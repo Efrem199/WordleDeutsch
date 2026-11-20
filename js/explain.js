@@ -125,7 +125,66 @@
     return result;
   }
 
-  const api = { getExplanation, parseWiktionary, cleanWiki, pageUrl };
+  /* ---------- Картинки из Википедии ---------- */
+
+  const IMG_CACHE_KEY = "wordle-deutsch-images-v1";
+
+  function loadImageCache() {
+    try {
+      return JSON.parse(localStorage.getItem(IMG_CACHE_KEY)) || {};
+    } catch (e) {
+      return {};
+    }
+  }
+  function saveImageCache(c) {
+    try {
+      localStorage.setItem(IMG_CACHE_KEY, JSON.stringify(c));
+    } catch (e) { /* не критично */ }
+  }
+
+  async function fetchSummary(title) {
+    const url = "https://de.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(title);
+    const res = await fetch(url, { headers: { accept: "application/json" } });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return res.json();
+  }
+
+  /**
+   * Картинка и подпись из статьи Википедии (если есть).
+   * Возвращает { title, description, thumb, full, page } или null.
+   * Пропускает begriffsklärung (несколько значений), чтобы не показать случайную картинку.
+   */
+  async function getWikiImage(word) {
+    const cache = loadImageCache();
+    if (Object.prototype.hasOwnProperty.call(cache, word)) return cache[word];
+
+    const cap = word.charAt(0).toUpperCase() + word.slice(1);
+    for (const title of [cap, word]) {
+      let s;
+      try {
+        s = await fetchSummary(title);
+      } catch (e) {
+        return null; // сеть недоступна — без кэширования
+      }
+      if (!s || s.type === "disambiguation" || !s.thumbnail || !s.thumbnail.source) continue;
+      const result = {
+        title: s.title || cap,
+        description: s.description || "",
+        thumb: s.thumbnail.source,
+        full: (s.originalimage && s.originalimage.source) || s.thumbnail.source,
+        page: (s.content_urls && s.content_urls.desktop && s.content_urls.desktop.page) || "https://de.wikipedia.org/wiki/" + encodeURIComponent(cap),
+      };
+      cache[word] = result;
+      saveImageCache(cache);
+      return result;
+    }
+    cache[word] = null;
+    saveImageCache(cache);
+    return null;
+  }
+
+  const api = { getExplanation, parseWiktionary, cleanWiki, pageUrl, getWikiImage };
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.WordExplain = api;
 })(typeof self !== "undefined" ? self : this);
