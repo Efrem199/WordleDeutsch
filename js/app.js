@@ -412,13 +412,27 @@
 
   const KEYBOARD_ROWS = L.KEYBOARD_ROWS;
 
+  /* Значки клавиш Enter и Backspace — SVG, чтобы масштабировались вместе с клавишей */
+  const ICON_ENTER =
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 10l-5 5 5 5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>' +
+    '<path d="M20 4v7a4 4 0 0 1-4 4H4" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const ICON_BACK =
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 5H9l-6 7 6 7h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>' +
+    '<path d="M12 9l5 6M17 9l-5 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>';
+
+  function keyIcon(key, label, svg, onClick) {
+    const b = el("button", { class: "key wide key-icon", "data-key": key, "aria-label": label, onclick: onClick });
+    b.innerHTML = svg;
+    return b;
+  }
+
   function buildKeyboard() {
     const kb = el("div", { class: "keyboard", id: "keyboard" });
     KEYBOARD_ROWS.forEach((keys, idx) => {
       const row = el("div", { class: "kb-row" });
-      if (idx === 2) row.appendChild(el("button", { class: "key wide", text: "↵", "data-key": "Enter", "aria-label": "Eingeben", onclick: () => handleKey("Enter") }));
+      if (idx === 2) row.appendChild(keyIcon("Enter", "Eingeben", ICON_ENTER, () => handleKey("Enter")));
       keys.forEach((k) => row.appendChild(el("button", { class: "key", text: k === "ß" ? "ẞ" : k, "data-key": k, onclick: () => handleKey(k) })));
-      if (idx === 2) row.appendChild(el("button", { class: "key wide", text: "⌫", "data-key": "Backspace", "aria-label": "Löschen", onclick: () => handleKey("Backspace") }));
+      if (idx === 2) row.appendChild(keyIcon("Backspace", "Löschen", ICON_BACK, () => handleKey("Backspace")));
       kb.appendChild(row);
     });
     return kb;
@@ -647,11 +661,19 @@
         });
         const explBox = el("div", { class: "word-list" });
         const exRow = el("tr", { class: "ex-row", hidden: true }, [el("td", { colspan: "5" }, [explBox])]);
+        let explBuilt = false;
+        let explOpen = false;
+        // Строка пояснений видна, только если пояснения открыты и «Verlauf» раскрыт
+        const syncExplRow = () => { exRow.hidden = !(explOpen && details.open); };
         const explBtn = el("button", { class: "btn small", text: "Bedeutungen anzeigen" });
         explBtn.addEventListener("click", () => {
-          explBtn.remove();
-          exRow.hidden = false;
-          g.answers.forEach((w) => explBox.appendChild(buildExplanation(w)));
+          if (!explBuilt) {
+            explBuilt = true;
+            g.answers.forEach((w) => explBox.appendChild(buildExplanation(w)));
+          }
+          explOpen = !explOpen;
+          explBtn.textContent = explOpen ? "Bedeutungen ausblenden" : "Bedeutungen anzeigen";
+          syncExplRow();
         });
         const words = el("div", { class: "muted small", text: "Wörter: " + g.answers.map((w, i) =>
           `${upper(w)}${g.solvedAt[i] !== null ? " (Versuch " + g.solvedAt[i] + ")" : " (nicht gelöst)"}`).join(", ") });
@@ -668,6 +690,7 @@
           el("td", { "data-label": "Gelöst", text: `${solved}/${g.answers.length} · ${g.guesses.length}/${g.maxAttempts}` }),
           el("td", { "data-label": "Details" }, [details]),
         ]));
+        details.addEventListener("toggle", syncExplRow);
         tbody.appendChild(exRow);
       });
       wrap.appendChild(el("div", { class: "table-wrap" }, [
