@@ -382,7 +382,7 @@ details summary { cursor: pointer; color: #8ec5ff; font-weight: 600; }
 @media (max-width: 420px) {
   .brand-text { font-size: 16px; }
   .play-info strong { font-size: 14px; }
-  .key.wide { font-size: 11px; }
+  .key.wide { font-size: 16px; }
   .kb-row { gap: 4px; }
 }
 @media (hover: none) {
