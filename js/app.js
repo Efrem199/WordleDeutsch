@@ -1,5 +1,11 @@
 /*
  * Wordle & Quordle auf Deutsch — UI, Speicherung und Navigation.
+ *
+ * Отрисовка: доска перестраивается при каждом нажатии клавиши, поэтому анимации
+ * привязаны к событиям, а не к перерисовке:
+ *   - reveal (переворот) только у строки, которую только что отправили (freshRows);
+ *   - pop (всплытие) только у буквы, которую только что ввели (popPending);
+ *   - win (подпрыгивание) только у угаданного слова в момент угадывания (freshWin).
  */
 (function () {
   const L = window.WordleLogic;
@@ -11,18 +17,19 @@
 
   let ANSWERS = [];
   let GUESS_SET = new Set();
-  let input = ""; // aktuelle Eingabe (nicht gespeichert)
+  let input = "";            // текущий ввод (не сохраняется)
+  let popPending = false;    // была ли только что введена буква
+  let freshRows = new Set(); // строки, которые нужно анимировать переворотом
+  let freshWin = new Set();  // строки с угаданным словом (подпрыгивание)
   let toastTimer = null;
 
-  /* ---------- Speicherung ---------- */
+  /* ---------- Хранение ---------- */
 
   function loadData() {
     try {
       const d = JSON.parse(localStorage.getItem(STORAGE_KEY));
       if (d && Array.isArray(d.games) && Array.isArray(d.used)) return d;
-    } catch (e) {
-      /* повреждённые данные — начинаем заново */
-    }
+    } catch (e) { /* повреждённые данные — начинаем заново */ }
     return { version: 1, games: [], used: [] };
   }
   let data = loadData();
@@ -35,8 +42,9 @@
     return data.games.find((g) => g.status === "playing") || null;
   }
 
-  function gameById(id) {
-    return data.games.find((g) => g.id === id) || null;
+  function lastFinishedGame() {
+    const done = data.games.filter((x) => x.status === "won" || x.status === "lost");
+    return done.length ? done[done.length - 1] : null;
   }
 
   function newId() {
@@ -53,7 +61,7 @@
     const count = L.MODES[mode].boards;
     const { words, reset } = L.pickWords(ANSWERS, count, data.used);
     data.used = (reset ? [] : data.used).concat(words);
-    const game = {
+    data.games.push({
       id: newId(),
       mode,
       status: "playing",
@@ -62,16 +70,15 @@
       maxAttempts: L.MODES[mode].maxAttempts,
       answers: words,
       solvedAt: words.map(() => null), // номер попытки, на которой слово угадано
-      guesses: [], // { word, results: [результат по доске | null] }
-      progress: [], // { attempt, solved, at } — сколько слов угадано на каждой попытке
-    };
-    data.games.push(game);
+      guesses: [],                     // { word, results: [результат по доске | null] }
+      progress: [],                    // { attempt, solved, at }
+    });
     saveData();
     input = "";
-    return game;
+    return data.games[data.games.length - 1];
   }
 
-  /* ---------- Игровая логика ---------- */
+  /* ---------- Логика попытки ---------- */
 
   function submitGuess(game) {
     if (input.length < L.WORD_LENGTH) return shakeRow("Zu wenig Buchstaben.");
@@ -80,12 +87,17 @@
     if (game.guesses.some((g) => g.word === word)) return shakeRow("Dieses Wort hast du schon getippt.");
 
     const attempt = game.guesses.length + 1;
+    const rowIndex = game.guesses.length;
     const results = game.answers.map((ans, i) =>
       game.solvedAt[i] === null ? L.evaluateGuess(word, ans) : null
     );
     game.answers.forEach((ans, i) => {
-      if (game.solvedAt[i] === null && word === ans) game.solvedAt[i] = attempt;
+      if (game.solvedAt[i] === null && word === ans) {
+        game.solvedAt[i] = attempt;
+        freshWin.add(rowKey(game, rowIndex, i));
+      }
     });
+    results.forEach((res, b) => { if (res) freshRows.add(rowKey(game, rowIndex, b)); });
     game.guesses.push({ word, results });
 
     const solved = game.solvedAt.filter((x) => x !== null).length;
@@ -100,8 +112,7 @@
     saveData();
     render();
     if (game.status !== "playing") {
-      const msg = game.status === "won" ? "Glückwunsch!" : "Leider verloren.";
-      showToast(msg);
+      showToast(game.status === "won" ? "Glückwunsch!" : "Leider verloren.");
     }
   }
 
@@ -110,12 +121,17 @@
     game.finishedAt = new Date().toISOString();
   }
 
-  /* ---------- Hilfsfunktionen UI ---------- */
+  function rowKey(game, r, b) {
+    return game.id + ":" + r + ":" + b;
+  }
+
+  /* ---------- Хелперы UI ---------- */
 
   function el(tag, attrs, children) {
     const n = document.createElement(tag);
     if (attrs) {
       for (const k of Object.keys(attrs)) {
+        if (attrs[k] === undefined || attrs[k] === null) continue;
         if (k === "class") n.className = attrs[k];
         else if (k === "text") n.textContent = attrs[k];
         else if (k.startsWith("on")) n.addEventListener(k.slice(2), attrs[k]);
@@ -130,7 +146,7 @@
     toastEl.textContent = text;
     toastEl.classList.add("show");
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toastEl.classList.remove("show"), 1600);
+    toastTimer = setTimeout(() => toastEl.classList.remove("show"), 1500);
   }
 
   function shakeRow(msg) {
@@ -138,7 +154,7 @@
     const row = document.querySelector(".row.current");
     if (row) {
       row.classList.remove("shake");
-      void row.offsetWidth;
+      void row.offsetWidth; // перезапуск анимации
       row.classList.add("shake");
     }
   }
@@ -165,97 +181,124 @@
     app.appendChild(node);
   }
 
-  /* ---------- Экран: меню ---------- */
+  /* ---------- Меню ---------- */
+
+  function hero() {
+    const letters = [["W", "c"], ["O", "p"], ["R", "a"], ["D", "c"], ["L", "p"], ["E", "c"]];
+    const tiles = el("div", { class: "hero-tiles", "aria-hidden": "true" },
+      letters.map(([ch, cls], i) => el("div", { class: "hero-tile " + cls, style: `animation-delay:${i * 0.08}s`, text: ch })));
+    return el("div", { class: "hero" }, [
+      tiles,
+      el("h1", { text: "Wordle & Quordle auf Deutsch" }),
+      el("p", { text: "Finde das deutsche Wort – allein oder vier auf einmal." }),
+    ]);
+  }
+
+  function modeCard(mode, title, desc, meta, icon, primary) {
+    const icons = el("div", { class: "mode-icons" }, [el("i", { class: "c" }), el("i", { class: "p" }), el("i", { class: "a" })]);
+    return el("button", {
+      class: "mode-card" + (primary ? " primary" : ""),
+      onclick: () => newGame(mode),
+    }, [
+      icons,
+      el("div", { class: "mode-body" }, [
+        el("div", { class: "mode-title", text: title }),
+        el("div", { class: "mode-desc", text: desc }),
+      ]),
+      el("div", { class: "mode-meta", text: meta }),
+    ]);
+  }
 
   function renderMenu() {
+    document.body.classList.remove("is-play");
     const cur = playingGame();
-    const menu = el("div", { class: "menu" });
-    menu.appendChild(el("h1", { text: "Wordle & Quordle auf Deutsch" }));
-    menu.appendChild(
-      el("p", { class: "muted", style: "text-align:center", text: "Errate das deutsche Wort in 6 Versuchen (Wordle) oder vier Wörter gleichzeitig in 9 Versuchen (Quordle)." })
-    );
+    const wrap = el("div", { class: "view view-menu" });
+    wrap.appendChild(hero());
+
     if (cur) {
-      const info = `${modeLabel(cur.mode)} · Versuch ${cur.guesses.length}/${cur.maxAttempts} · ${cur.solvedAt.filter((x) => x !== null).length}/${cur.answers.length} gelöst`;
-      menu.appendChild(el("a", { class: "btn primary", href: "#play", text: "Laufendes Spiel fortsetzen" }));
-      menu.appendChild(el("p", { class: "muted", style: "text-align:center; margin:-4px 0 0", text: info }));
+      const solved = cur.solvedAt.filter((x) => x !== null).length;
+      wrap.appendChild(el("a", { class: "card continue", href: "#play" }, [
+        el("div", null, [
+          el("div", { class: "t", text: "Laufendes Spiel fortsetzen" }),
+          el("div", { class: "muted small", text: `${modeLabel(cur.mode)} · Versuch ${cur.guesses.length + 1}/${cur.maxAttempts} · ${solved}/${cur.answers.length} gelöst` }),
+        ]),
+        el("span", { class: "btn primary", text: "Weiter ›" }),
+      ]));
     }
-    menu.appendChild(
-      el("button", { class: "btn" + (cur ? "" : " primary"), text: "Wordle spielen (1 Wort)", onclick: () => newGame("wordle") })
-    );
-    menu.appendChild(
-      el("button", { class: "btn", text: "Quordle spielen (4 Wörter)", onclick: () => newGame("quordle") })
-    );
-    menu.appendChild(el("a", { class: "btn", href: "#stats", text: "Verlauf & Statistik" }));
-    menu.appendChild(el("a", { class: "btn", href: "#rules", text: "Spielregeln" }));
-    menu.appendChild(
-      el("p", { class: "muted", style: "text-align:center", text: `Wortliste: ${GUESS_SET.size} gültige Wörter · ${ANSWERS.length} mögliche Lösungen` })
-    );
-    setView(menu);
+
+    wrap.appendChild(el("div", { class: "mode-grid" }, [
+      modeCard("wordle", "Wordle", "Ein Wort in 6 Versuchen.", "1 Wort · 6 Versuche", null, !cur),
+      modeCard("quordle", "Quordle", "Vier Wörter gleichzeitig in 9 Versuchen.", "4 Wörter · 9 Versuche", null, false),
+    ]));
+
+    wrap.appendChild(el("div", { class: "secondary" }, [
+      el("a", { class: "chip", href: "#stats", text: "Verlauf & Statistik" }),
+      el("a", { class: "chip", href: "#rules", text: "Spielregeln" }),
+    ]));
+    wrap.appendChild(el("p", { class: "muted small center", text: `${GUESS_SET.size} gültige Wörter · ${ANSWERS.length} mögliche Lösungen` }));
+    setView(wrap);
   }
 
   function newGame(mode) {
     const cur = playingGame();
     if (cur && !window.confirm("Das laufende Spiel wird als abgebrochen gespeichert. Neues Spiel starten?")) return;
     startNewGame(mode);
-    location.hash = "#play";
     if (location.hash === "#play") render();
+    else location.hash = "#play";
   }
 
-  /* ---------- Экран: игра ---------- */
+  /* ---------- Игра ---------- */
 
   function renderPlay() {
-    const game = playingGame();
-    const active = game && game.status === "playing" ? game : null;
-
-    // Нет активной игры — показываем итог последней завершённой
+    const active = playingGame();
     const g = active || lastFinishedGame();
     if (!g) return renderMenu();
 
-    const wrap = el("div");
-    const head = el("div", { class: "game-head" }, [
-      el("div", { class: "info", text: `${modeLabel(g.mode)} · Versuch ${Math.min(g.guesses.length + (g.status === "playing" ? 1 : 0), g.maxAttempts)} von ${g.maxAttempts}` }),
-      el("div", { class: "btn-row", style: "margin:0" }, [
-        el("a", { class: "btn small", href: "#menu", text: "Menü" }),
-        g.status === "playing"
-          ? el("button", { class: "btn small danger", text: "Neues Spiel", onclick: () => newGame(g.mode) })
-          : el("button", { class: "btn small primary", text: "Neue Runde", onclick: () => newGame(g.mode) }),
+    const playing = g.status === "playing";
+    const n = g.answers.length;
+    document.body.classList.toggle("is-play", playing);
+
+    const view = el("div", { class: "view view-play" });
+    view.appendChild(el("div", { class: "play-bar" }, [
+      el("a", { class: "icon-btn", href: "#menu", text: "‹ Menü" }),
+      el("div", { class: "play-info" }, [
+        el("strong", { text: modeLabel(g.mode) }),
+        el("span", { text: playing
+          ? `Versuch ${g.guesses.length + 1} von ${g.maxAttempts}`
+          : `${statusLabel(g.status)} · ${g.guesses.length}/${g.maxAttempts} Versuche` }),
       ]),
-    ]);
-    wrap.appendChild(head);
+      playing
+        ? el("button", { class: "icon-btn danger", text: "Neu", onclick: () => newGame(g.mode) })
+        : el("button", { class: "icon-btn primary", text: "Neue Runde", onclick: () => newGame(g.mode) }),
+    ]));
 
-    const boards = el("div", { class: "boards " + (g.answers.length > 1 ? "quad" : "single"), id: "boards" });
-    wrap.appendChild(boards);
-    wrap.appendChild(buildKeyboard(g));
+    const scroll = el("div", { class: "play-scroll" });
+    scroll.appendChild(el("div", { id: "boards", class: "boards " + (n > 1 ? "quad" : "single") }));
+    if (!playing) scroll.appendChild(buildResult(g));
+    view.appendChild(scroll);
 
-    if (g.status !== "playing") {
-      wrap.appendChild(buildResult(g));
+    if (playing) {
+      view.appendChild(el("div", { class: "keyboard-dock" }, [buildKeyboard()]));
     }
-    setView(wrap);
+    setView(view);
     drawBoards(g);
-  }
-
-  function lastFinishedGame() {
-    const done = data.games.filter((x) => x.status !== "playing" && x.status !== "aborted");
-    return done.length ? done[done.length - 1] : null;
   }
 
   function drawBoards(g) {
     const boards = document.getElementById("boards");
     if (!boards) return;
-    boards.innerHTML = "";
-    const n = g.answers.length;
     const isPlaying = g.status === "playing";
-    const ended = !isPlaying;
+    const nodes = [];
 
     g.answers.forEach((ans, b) => {
       const solvedAt = g.solvedAt[b];
       const boardEl = el("div", { class: "board" });
-      let title = n > 1 ? `Wort ${b + 1}` : "";
-      if (n > 1) {
-        if (solvedAt !== null) title += ` · ✔ ${upper(ans)} (Versuch ${solvedAt})`;
-        else if (ended) title += ` · ${upper(ans)}`;
+      if (g.answers.length > 1) {
+        let title = `Wort ${b + 1}`;
+        if (solvedAt !== null) title = `✔ ${upper(ans)} · Versuch ${solvedAt}`;
+        else if (!isPlaying) title = upper(ans);
+        boardEl.appendChild(el("div", { class: "board-title" + (solvedAt !== null ? " solved" : ""), text: title }));
       }
-      boardEl.appendChild(el("div", { class: "board-title" + (solvedAt !== null ? " solved" : ""), text: title }));
 
       const rows = el("div", { class: "rows" });
       for (let r = 0; r < g.maxAttempts; r++) {
@@ -264,47 +307,58 @@
           const gu = g.guesses[r];
           const res = gu.results[b];
           if (res) {
+            const key = rowKey(g, r, b);
+            const fresh = freshRows.has(key);
+            const win = freshWin.has(key);
             Array.from(gu.word).forEach((ch, i) => {
-              row.appendChild(el("div", { class: `tile ${res[i]} flip`, style: `animation-delay:${i * 0.1}s`, text: L.displayLetter(ch) }));
+              const cls = ["tile", res[i]];
+              if (fresh) cls.push("reveal");
+              if (win) cls.push("win");
+              const t = el("div", { class: cls.join(" "), text: L.displayLetter(ch) });
+              if (fresh) t.style.animationDelay = `${i * 0.15}s`;
+              if (win) t.style.animationDelay = `${0.75 + i * 0.09}s`;
+              row.appendChild(t);
             });
           } else {
             row.classList.add("frozen");
-            for (let i = 0; i < L.WORD_LENGTH; i++) row.appendChild(el("div", { class: "tile" }));
+            for (let i = 0; i < L.WORD_LENGTH; i++) row.appendChild(el("div", { class: "tile empty" }));
           }
         } else if (r === g.guesses.length && isPlaying && solvedAt === null) {
           row.classList.add("current");
           const letters = Array.from(input);
           for (let i = 0; i < L.WORD_LENGTH; i++) {
             const ch = letters[i];
-            row.appendChild(el("div", { class: "tile" + (ch ? " filled" : ""), text: ch ? L.displayLetter(ch) : "" }));
+            const cls = ["tile", ch ? "filled" : "empty"];
+            if (ch && popPending && i === letters.length - 1) cls.push("pop");
+            row.appendChild(el("div", { class: cls.join(" "), text: ch ? L.displayLetter(ch) : "" }));
           }
         } else {
-          if (solvedAt !== null || (ended && n > 1)) row.classList.add("frozen");
-          for (let i = 0; i < L.WORD_LENGTH; i++) row.appendChild(el("div", { class: "tile" }));
+          if (solvedAt !== null) row.classList.add("frozen");
+          for (let i = 0; i < L.WORD_LENGTH; i++) row.appendChild(el("div", { class: "tile empty" }));
         }
         rows.appendChild(row);
       }
       boardEl.appendChild(rows);
-      boards.appendChild(boardEl);
+      nodes.push(boardEl);
     });
-    // Einzel-Wordle: Lösung erst nach Spielende zeigen (über Ergebnisfeld)
-    boards.classList.toggle("single", n === 1);
+
+    boards.replaceChildren(...nodes);
+    // Одноразовые флаги: после отрисовки анимации не должны повторяться
+    freshRows.clear();
+    freshWin.clear();
+    popPending = false;
     refreshKeyboard(g);
   }
 
-  function buildKeyboard(g) {
+  const KEYBOARD_ROWS = L.KEYBOARD_ROWS;
+
+  function buildKeyboard() {
     const kb = el("div", { class: "keyboard", id: "keyboard" });
-    L.KEYBOARD_ROWS.forEach((keys, idx) => {
+    KEYBOARD_ROWS.forEach((keys, idx) => {
       const row = el("div", { class: "kb-row" });
-      if (idx === 2) {
-        row.appendChild(el("button", { class: "key wide", text: "Enter", "data-key": "Enter", onclick: () => handleKey("Enter") }));
-      }
-      keys.forEach((k) => {
-        row.appendChild(el("button", { class: "key", text: k.toUpperCase(), "data-key": k, onclick: () => handleKey(k) }));
-      });
-      if (idx === 2) {
-        row.appendChild(el("button", { class: "key wide", text: "⌫", "data-key": "Backspace", onclick: () => handleKey("Backspace") }));
-      }
+      if (idx === 2) row.appendChild(el("button", { class: "key wide", text: "Enter", "data-key": "Enter", onclick: () => handleKey("Enter") }));
+      keys.forEach((k) => row.appendChild(el("button", { class: "key", text: k, "data-key": k, onclick: () => handleKey(k) })));
+      if (idx === 2) row.appendChild(el("button", { class: "key wide", text: "⌫", "data-key": "Backspace", "aria-label": "Löschen", onclick: () => handleKey("Backspace") }));
       kb.appendChild(row);
     });
     return kb;
@@ -329,6 +383,7 @@
       input = Array.from(input).slice(0, -1).join("");
     } else if (Array.from(input).length < L.WORD_LENGTH) {
       input += L.normalizeWord(key);
+      popPending = true;
     }
     drawBoards(g);
   }
@@ -336,29 +391,29 @@
   function buildResult(g) {
     const solved = g.solvedAt.filter((x) => x !== null).length;
     const won = g.status === "won";
-    const box = el("div", { class: "card result" });
-    box.appendChild(el("h2", { text: won ? "Geschafft! 🎉" : "Schade, das war's." }));
-    box.appendChild(
-      el("p", {
-        text: `${solved} von ${g.answers.length} ${g.answers.length > 1 ? "Wörtern" : "Wort"} erraten in ${g.guesses.length} von ${g.maxAttempts} Versuchen.`,
-      })
-    );
-    box.appendChild(el("h2", { text: g.answers.length > 1 ? "Die Lösungen und ihre Bedeutung" : "Die Lösung und ihre Bedeutung" }));
+    const n = g.answers.length;
+    const box = el("section", { class: "card result" });
+    box.appendChild(el("div", { class: "result-head" }, [
+      el("div", { class: "result-emoji", text: won ? "🎉" : "🙁" }),
+      el("div", null, [
+        el("h2", { text: won ? "Geschafft!" : "Schade, das war's." }),
+        el("p", { class: "muted", text: `${solved} von ${n} ${n > 1 ? "Wörtern" : "Wort"} in ${g.guesses.length} von ${g.maxAttempts} Versuchen erraten.` }),
+      ]),
+    ]));
+    box.appendChild(el("h2", { text: n > 1 ? "Lösungen & Bedeutung" : "Lösung & Bedeutung" }));
     g.answers.forEach((ans) => box.appendChild(buildExplanation(ans)));
-    box.appendChild(
-      el("div", { class: "btn-row" }, [
-        el("button", { class: "btn primary", text: "Neue Runde", onclick: () => newGame(g.mode) }),
-        el("a", { class: "btn", href: "#stats", text: "Verlauf ansehen" }),
-        el("a", { class: "btn", href: "#menu", text: "Zum Menü" }),
-      ])
-    );
+    box.appendChild(el("div", { class: "btn-row" }, [
+      el("button", { class: "btn primary", text: "Neue Runde", onclick: () => newGame(g.mode) }),
+      el("a", { class: "btn", href: "#stats", text: "Verlauf" }),
+      el("a", { class: "btn", href: "#menu", text: "Menü" }),
+    ]));
     return box;
   }
 
   function buildExplanation(word) {
     const holder = el("div", { class: "explain" }, [
       el("span", { class: "word", text: upper(word) }),
-      el("span", { class: "muted", text: "  lädt Bedeutung …" }),
+      el("span", { class: "muted small", text: "  lädt Bedeutung …" }),
     ]);
     EX.getExplanation(word).then((r) => {
       holder.innerHTML = "";
@@ -369,51 +424,51 @@
         r.defs.forEach((d) => ol.appendChild(el("li", { text: d })));
         holder.appendChild(ol);
       } else {
-        holder.appendChild(el("p", { class: "muted", text: "Keine Bedeutung gefunden (offline oder nicht im Wiktionary)." }));
+        holder.appendChild(el("p", { class: "muted small", text: "Keine Bedeutung gefunden (offline oder nicht im Wiktionary)." }));
       }
       holder.appendChild(el("a", { href: r.url, target: "_blank", rel: "noopener", text: "Wiktionary ↗" }));
     });
     return holder;
   }
 
-  /* ---------- Экран: статистика и история ---------- */
+  /* ---------- Статистика и история ---------- */
+
+  function statBox(num, label) {
+    return el("div", { class: "stat" }, [el("div", { class: "num", text: String(num) }), el("div", { class: "lbl", text: label })]);
+  }
 
   function renderStats() {
+    document.body.classList.remove("is-play");
     const finished = data.games.filter((g) => g.status === "won" || g.status === "lost");
     const won = finished.filter((g) => g.status === "won");
     const wordleDone = finished.filter((g) => g.mode === "wordle");
     const quordleDone = finished.filter((g) => g.mode === "quordle");
-    const wins = won.length;
-    const winRate = finished.length ? Math.round((wins / finished.length) * 100) : 0;
+    const winRate = finished.length ? Math.round((won.length / finished.length) * 100) : 0;
 
-    // Серия побед подряд (по порядку завершения)
     let streak = 0, best = 0;
     finished.forEach((g) => {
       if (g.status === "won") { streak++; best = Math.max(best, streak); } else streak = 0;
     });
-    const avgWordle = wordleDone.filter((g) => g.status === "won").map((g) => g.guesses.length);
-    const avg = avgWordle.length ? (avgWordle.reduce((a, b) => a + b, 0) / avgWordle.length).toFixed(1) : "–";
+    const wonWordle = wordleDone.filter((g) => g.status === "won").map((g) => g.guesses.length);
+    const avg = wonWordle.length ? (wonWordle.reduce((a, b) => a + b, 0) / wonWordle.length).toFixed(1) : "–";
 
-    const wrap = el("div");
+    const wrap = el("div", { class: "view" });
     wrap.appendChild(el("h1", { text: "Verlauf & Statistik" }));
-    const grid = el("div", { class: "stat-grid" }, [
+    wrap.appendChild(el("div", { class: "stat-grid" }, [
       statBox(finished.length, "Spiele beendet"),
-      statBox(wins, "Siege"),
+      statBox(won.length, "Siege"),
       statBox(winRate + " %", "Siegquote"),
       statBox(best, "Beste Siegesserie"),
       statBox(wordleDone.length, "Wordle beendet"),
       statBox(quordleDone.length, "Quordle beendet"),
-      statBox(avg, "Ø Versuche bei Wordle-Sieg"),
-    ]);
-    wrap.appendChild(grid);
+      statBox(avg, "Ø Versuche (Wordle-Sieg)"),
+    ]));
 
     wrap.appendChild(el("h2", { text: "Alle Spiele" }));
     if (!data.games.length) {
       wrap.appendChild(el("p", { class: "muted", text: "Noch keine Spiele. Starte im Menü eine Runde!" }));
     } else {
-      const tbl = el("table");
-      tbl.appendChild(el("thead", null, [el("tr", null, ["Datum", "Modus", "Ergebnis", "Gelöst", "Details"].map((t) => el("th", { text: t })))]));
-      const tb = el("tbody");
+      const tbody = el("tbody");
       data.games.slice().reverse().forEach((g) => {
         const solved = g.solvedAt.filter((x) => x !== null).length;
         const detailsList = el("ul", { class: "progress-list" });
@@ -421,71 +476,73 @@
         g.progress.forEach((p) => {
           detailsList.appendChild(el("li", { text: `Versuch ${p.attempt}: ${p.solved} von ${g.answers.length} Wörtern gelöst (${fmtDate(p.at)})` }));
         });
-        const wordsBox = el("div", { class: "card", style: "margin:8px 0 0; padding:10px" });
-        wordsBox.appendChild(el("div", { class: "muted", text: "Wörter: " + g.answers.map((w, i) => `${upper(w)}${g.solvedAt[i] !== null ? " (Versuch " + g.solvedAt[i] + ")" : " (nicht gelöst)"}`).join(", ") }));
+        const explBox = el("div", { class: "word-list" });
         const explBtn = el("button", { class: "btn small", text: "Bedeutungen anzeigen" });
-        const explBox = el("div");
         explBtn.addEventListener("click", () => {
           explBtn.remove();
           g.answers.forEach((w) => explBox.appendChild(buildExplanation(w)));
         });
-        wordsBox.appendChild(el("div", { style: "margin-top:6px" }, [explBtn]));
-        wordsBox.appendChild(explBox);
-
-        const details = el("details", null, [el("summary", { text: "Verlauf" }), detailsList, wordsBox]);
-        tb.appendChild(el("tr", null, [
-          el("td", { text: fmtDate(g.startedAt) }),
-          el("td", { text: modeLabel(g.mode) }),
-          el("td", null, [el("span", { class: "badge " + g.status, text: statusLabel(g.status) })]),
-          el("td", { text: `${solved}/${g.answers.length} · ${g.guesses.length}/${g.maxAttempts} Versuche` }),
-          el("td", null, [details]),
+        const words = el("div", { class: "muted small", text: "Wörter: " + g.answers.map((w, i) =>
+          `${upper(w)}${g.solvedAt[i] !== null ? " (Versuch " + g.solvedAt[i] + ")" : " (nicht gelöst)"}`).join(", ") });
+        const details = el("details", null, [
+          el("summary", { text: "Verlauf" }),
+          detailsList,
+          el("div", { style: "margin-top:8px" }, [words]),
+          el("div", { style: "margin-top:8px" }, [explBtn]),
+          explBox,
+        ]);
+        tbody.appendChild(el("tr", null, [
+          el("td", { "data-label": "Datum", text: fmtDate(g.startedAt) }),
+          el("td", { "data-label": "Modus", text: modeLabel(g.mode) }),
+          el("td", { "data-label": "Ergebnis" }, [el("span", { class: "badge " + g.status, text: statusLabel(g.status) })]),
+          el("td", { "data-label": "Gelöst", text: `${solved}/${g.answers.length} · ${g.guesses.length}/${g.maxAttempts}` }),
+          el("td", { "data-label": "Details" }, [details]),
         ]));
       });
-      tbl.appendChild(tb);
-      const scroll = el("div", { style: "overflow-x:auto" }, [tbl]);
-      wrap.appendChild(scroll);
+      wrap.appendChild(el("div", { class: "table-wrap" }, [
+        el("table", null, [
+          el("thead", null, [el("tr", null, ["Datum", "Modus", "Ergebnis", "Gelöst", "Details"].map((t) => el("th", { text: t })))]),
+          tbody,
+        ]),
+      ]));
     }
 
-    wrap.appendChild(
-      el("div", { class: "btn-row" }, [
-        el("a", { class: "btn", href: "#menu", text: "Zum Menü" }),
-        el("button", {
-          class: "btn danger",
-          text: "Alle Daten löschen",
-          onclick: () => {
-            if (window.confirm("Alle gespeicherten Spiele und Statistiken wirklich löschen?")) {
-              data = { version: 1, games: [], used: [] };
-              saveData();
-              showToast("Daten gelöscht.");
-              render();
-            }
-          },
-        }),
-      ])
-    );
+    wrap.appendChild(el("div", { class: "btn-row" }, [
+      el("a", { class: "btn", href: "#menu", text: "Menü" }),
+      el("button", {
+        class: "btn danger",
+        text: "Alle Daten löschen",
+        onclick: () => {
+          if (window.confirm("Alle gespeicherten Spiele und Statistiken wirklich löschen?")) {
+            data = { version: 1, games: [], used: [] };
+            saveData();
+            showToast("Daten gelöscht.");
+            render();
+          }
+        },
+      }),
+    ]));
     setView(wrap);
   }
 
-  function statBox(num, label) {
-    return el("div", { class: "stat" }, [el("div", { class: "num", text: String(num) }), el("div", { class: "lbl", text: label })]);
-  }
-
-  /* ---------- Экран: правила ---------- */
+  /* ---------- Regeln ---------- */
 
   function renderRules() {
-    const wrap = el("div", { class: "card" });
-    wrap.innerHTML = `
-      <h1>Spielregeln</h1>
-      <p><strong>Wordle:</strong> Errate das 5-buchstabige deutsche Wort in höchstens 6 Versuchen.</p>
-      <p><strong>Quordle:</strong> Errate gleichzeitig 4 Wörter in höchstens 9 Versuchen. Jeder Tipp gilt für alle noch offenen Wörter.</p>
-      <ul>
-        <li>Nur echte Wörter aus dem Wörterbuch sind erlaubt (ÄÖÜ sind eigene Buchstaben, ß kommt nicht vor).</li>
-        <li><span style="color:#6aaa64"><strong>Grün</strong></span>: Der Buchstabe ist richtig und an der richtigen Stelle.</li>
-        <li><span style="color:#c9b458"><strong>Gelb</strong></span>: Der Buchstabe kommt im Wort vor, aber an einer anderen Stelle.</li>
-        <li><span style="color:#9a9a9e"><strong>Grau</strong></span>: Der Buchstabe kommt im Wort nicht vor.</li>
-      </ul>
-      <p class="muted">Am Ende des Spiels siehst du die Lösung und ihre Bedeutung. Alle Spiele und Versuche werden im Verlauf gespeichert.</p>
-      <div class="btn-row"><a class="btn" href="#menu">Zum Menü</a></div>`;
+    document.body.classList.remove("is-play");
+    const sw = (cls, text) => el("li", null, [el("span", { class: "mode-icons", style: "display:inline-flex;margin-right:8px;vertical-align:middle" }, [el("i", { class: cls, style: "width:16px;height:16px;border-radius:4px;display:block" })]), text]);
+    const wrap = el("div", { class: "view card" }, [
+      el("h1", { text: "Spielregeln" }),
+      el("p", null, [el("strong", { text: "Wordle: " }), "Errate das 5-buchstabige deutsche Wort in höchstens 6 Versuchen."]),
+      el("p", null, [el("strong", { text: "Quordle: " }), "Errate gleichzeitig 4 Wörter in höchstens 9 Versuchen. Jeder Tipp gilt für alle noch offenen Wörter."]),
+      el("ul", { style: "list-style:none;padding:0;margin:14px 0" }, [
+        sw("c", "Grün: der Buchstabe steht richtig an dieser Stelle."),
+        sw("p", "Gelb: der Buchstabe kommt im Wort vor, aber an einer anderen Stelle."),
+        sw("a", "Grau: der Buchstabe kommt im Wort nicht vor."),
+      ]),
+      el("p", { class: "muted", text: "Nur echte Wörter aus dem Wörterbuch sind erlaubt. ÄÖÜ sind eigene Buchstaben; ß kommt nicht vor." }),
+      el("p", { class: "muted", text: "Am Ende siehst du die Lösung und ihre Bedeutung. Alle Spiele und Versuche werden im Verlauf gespeichert." }),
+      el("div", { class: "btn-row" }, [el("a", { class: "btn primary", href: "#menu", text: "Zum Menü" })]),
+    ]);
     setView(wrap);
   }
 
@@ -503,16 +560,12 @@
 
   document.addEventListener("keydown", (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
-    const h = (location.hash || "").replace("#", "");
-    if (h !== "play") return;
+    if ((location.hash || "").replace("#", "") !== "play") return;
     const g = playingGame();
     if (!g) return;
-    if (e.key === "Enter") { e.preventDefault(); handleKey("Enter"); return; }
-    if (e.key === "Backspace") { e.preventDefault(); handleKey("Backspace"); return; }
-    if (/^[a-zA-ZäöüÄÖÜ]$/.test(e.key)) {
-      e.preventDefault();
-      handleKey(e.key);
-    }
+    if (e.key === "Enter") { e.preventDefault(); return handleKey("Enter"); }
+    if (e.key === "Backspace") { e.preventDefault(); return handleKey("Backspace"); }
+    if (/^[a-zA-ZäöüÄÖÜ]$/.test(e.key)) { e.preventDefault(); handleKey(e.key); }
   });
 
   window.addEventListener("hashchange", render);
