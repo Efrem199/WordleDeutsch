@@ -3,7 +3,7 @@
  * Лицензия текстов: CC BY-SA 4.0.
  */
 (function (root) {
-  const CACHE_KEY = "wordle-deutsch-definitions-v4";
+  const CACHE_KEY = "wordle-deutsch-definitions-v5";
   const API = "https://de.wiktionary.org/w/api.php";
   const WIKTIONARY = "https://de.wiktionary.org";
   const MAX_DEFS = 3;
@@ -52,6 +52,44 @@
     return null;
   }
 
+  function findNominative(node) {
+    const table = node.matches("table.inflection-table") ? node : node.querySelector("table.inflection-table");
+    if (!table) return null;
+    const rows = [...table.querySelectorAll("tr")];
+    const columns = rows.find((row) => [...row.children].some((cell) => /^(Singular|Plural)\b/.test(cell.textContent.trim())));
+    const nominative = rows.find((row) => row.firstElementChild?.textContent.trim() === "Nominativ");
+    if (!columns || !nominative) return null;
+    const form = (index) => {
+      const cell = nominative.children[index];
+      const text = cell?.textContent.replace(/\s+/g, " ").trim() || "";
+      return /^(der|die|das)\s+/.test(text) ? text : "";
+    };
+    let singular = "";
+    const plurals = [];
+    [...columns.children].forEach((cell, index) => {
+      const label = cell.textContent.trim();
+      if (label === "Singular") singular = form(index);
+      if (label.startsWith("Plural")) plurals.push(form(index));
+    });
+    const distinctPlurals = [...new Set(plurals.filter(Boolean))];
+    return singular || distinctPlurals.length ? { singular, plurals: distinctPlurals } : null;
+  }
+
+  function findPronunciation(node) {
+    for (const link of node.querySelectorAll("a[href]")) {
+      if (link.textContent.trim() !== "Hörbeispiele:") continue;
+      const lines = link.closest("dd")?.querySelectorAll("a[href]") || [];
+      for (const recording of lines) {
+        const src = recording.getAttribute("href");
+        if (!/^(?:https:)?\/\/upload\.wikimedia\.org\/wikipedia\/[^?#]+\.(?:ogg|oga|mp3|wav|opus)(?:[?#]|$)/i.test(src)) continue;
+        const url = new URL(src, WIKTIONARY);
+        const filename = url.pathname.split("/").at(-1);
+        return { url: url.href, page: WIKTIONARY + "/wiki/Datei:" + filename };
+      }
+    }
+    return null;
+  }
+
   function parseWiktionary(html, anchor = "") {
     // A template is inert. The HTML and its links are never inserted into the UI.
     const template = document.createElement("template");
@@ -69,7 +107,7 @@
       if (!german) continue;
       if (heading?.tagName === "H3") {
         const pos = [...heading.querySelectorAll(POS_LINK)].map((link) => link.textContent.trim());
-        section = { heading, pos, defs: [], lemma: null, image: null };
+        section = { heading, pos, defs: [], lemma: null, image: null, grammar: null, audio: null };
         sections.push(section);
       } else if (section) {
         if (section.pos.includes("Substantiv") && node.matches("p") && node.textContent.trim() === "Bedeutungen:") {
@@ -79,7 +117,11 @@
           }
         }
         if (!section.lemma) section.lemma = lemmaTarget(node);
-        if (!section.image && section.pos.includes("Substantiv")) section.image = findIllustration(node);
+        if (section.pos.includes("Substantiv")) {
+          if (!section.image) section.image = findIllustration(node);
+          if (!section.grammar) section.grammar = findNominative(node);
+          if (!section.audio) section.audio = findPronunciation(node);
+        }
       }
     }
 
@@ -93,8 +135,11 @@
     const commonDefs = collect(common);
     const defs = commonDefs.length ? commonDefs : collect(nouns);
     const lemma = selected.find((entry) => entry.lemma)?.lemma || null;
-    const image = (common.length ? common : nouns).find((noun) => noun.image)?.image || null;
-    return { wortart: defs.length ? "Substantiv" : "", defs, lemma, image };
+    const entries = common.length ? common : nouns;
+    const image = entries.find((noun) => noun.image)?.image || null;
+    const grammar = entries.find((noun) => noun.grammar)?.grammar || null;
+    const audio = entries.find((noun) => noun.audio)?.audio || null;
+    return { wortart: defs.length ? "Substantiv" : "", defs, lemma, image, grammar, audio };
   }
 
   function capitalized(word) {
@@ -142,7 +187,7 @@
     if (cached) return cached;
 
     const title = capitalized(word);
-    const result = { word, wortart: "", defs: [], url: pageUrl(title), ok: false, image: null };
+    const result = { word, wortart: "", defs: [], url: pageUrl(title), ok: false, image: null, grammar: null, audio: null };
     const visited = new Set();
     let target = { title, anchor: "" };
     try {
@@ -155,6 +200,10 @@
         if (!page?.text) break;
         const parsed = parseWiktionary(page.text, target.anchor);
         if (!result.image && parsed.image) result.image = { title, ...parsed.image };
+        if (target.title === title && (!page.title || page.title === title)) {
+          result.grammar = parsed.grammar;
+          result.audio = parsed.audio;
+        }
         if (parsed.defs.length) {
           const explained = { ...result, wortart: parsed.wortart, defs: parsed.defs,
             url: pageUrl(page.title || target.title, target.anchor), ok: true };

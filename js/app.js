@@ -18,18 +18,22 @@
 
   let ANSWERS = [];
   let GUESS_SET = new Set();
+  let DAILY_WORDS = [];
   let dictionaryState = "loading";
+  let dailyState = "loading";
   let input = "";            // текущий ввод (не сохраняется)
   let popPending = false;    // была ли только что введена буква
   let freshRows = new Set(); // строки, которые нужно анимировать переворотом
   let freshWin = new Set();  // строки с угаданным словом (подпрыгивание)
   let toastTimer = null;
   let submitting = false;
+  let selectedBoard = 0;
+  let visibleGameId = null;
 
   /* ---------- Хранение ---------- */
 
   function emptyData() {
-    return { version: 1, games: [], used: [] };
+    return { version: 1, games: [], used: [], savedWords: [] };
   }
 
   function loadData() {
@@ -49,6 +53,7 @@
           && Array.isArray(g.guesses) && Array.isArray(g.progress)
           && Array.isArray(g.solvedAt) && g.solvedAt.length === g.answers.length);
         d.used = d.used.filter(L.isWellFormed);
+        d.savedWords = Array.isArray(d.savedWords) ? [...new Set(d.savedWords.filter(L.isWellFormed))] : [];
         return d;
       }
     } catch { /* повреждённые данные — начинаем заново */ }
@@ -79,13 +84,34 @@
     update();
   }
 
-  function playingGame() {
-    return data.games.find((g) => g.status === "playing") || null;
+  function randomGame() {
+    return data.games.find((g) => !g.dailyDate && g.status === "playing") || null;
   }
 
-  function lastFinishedGame() {
-    const done = data.games.filter((x) => x.status === "won" || x.status === "lost");
-    return done.length ? done[done.length - 1] : null;
+  function todayGame(mode, date) {
+    return data.games.find((g) => g.dailyDate === date && g.mode === mode);
+  }
+
+  function playUrl(game) {
+    return "#play/" + game.id;
+  }
+
+  function routedGame() {
+    const hash = location.hash;
+    if (hash.startsWith("#play/")) return data.games.find((g) => playUrl(g) === hash) || null;
+    if (hash !== "#play") return null;
+    return randomGame() || data.games.findLast((g) => g.status === "playing")
+      || data.games.findLast((g) => g.status === "won" || g.status === "lost") || null;
+  }
+
+  function playingGame() {
+    const game = routedGame();
+    return game?.status === "playing" ? game : null;
+  }
+
+  function goToGame(game) {
+    if (location.hash === playUrl(game)) render();
+    else location.hash = playUrl(game);
   }
 
   function newId() {
@@ -93,18 +119,11 @@
     return Date.now().toString(36) + Math.random().toString(36).slice(2);
   }
 
-  function startNewGame(mode) {
-    const cur = playingGame();
-    if (cur) {
-      cur.status = "aborted";
-      cur.finishedAt = new Date().toISOString();
-    }
-    const count = L.MODES[mode].boards;
-    const { words, reset } = L.pickWords(ANSWERS, count, data.used);
-    data.used = (reset ? [] : data.used).concat(words);
-    data.games.push({
+  function addGame(mode, words, dailyDate) {
+    const game = {
       id: newId(),
       mode,
+      ...(dailyDate ? { dailyDate } : {}),
       status: "playing",
       startedAt: new Date().toISOString(),
       finishedAt: null,
@@ -113,52 +132,10 @@
       solvedAt: words.map(() => null), // номер попытки, на которой слово угадано
       guesses: [],                     // { word, results: [результат по доске | null] }
       progress: [],                    // { attempt, solved, at }
-    });
+    };
+    data.games.push(game);
     saveData();
-    input = "";
-    return data.games[data.games.length - 1];
-  }
-
-  /* ---------- Декор ---------- */
-
-  /* Плавающие буквы на фоне — лёгкое движение без влияния на игру */
-  function buildBackground() {
-    const host = document.getElementById("bg-letters");
-    if (!host) return;
-    const letters = "WORDLEÄÖÜAßÖ";
-    const colors = ["#3fa34d", "#ffffff", "#8e94a3"];
-    const rnd = (a, b) => a + Math.random() * (b - a);
-    for (let i = 0; i < 16; i++) {
-      const span = el("span", { text: letters[i % letters.length] });
-      span.style.setProperty("--x", rnd(0, 96).toFixed(1) + "%");
-      span.style.setProperty("--y", rnd(0, 96).toFixed(1) + "%");
-      span.style.setProperty("--s", Math.round(rnd(28, 96)) + "px");
-      span.style.setProperty("--o", (rnd(0.04, 0.09)).toFixed(3));
-      span.style.setProperty("--d", rnd(14, 28).toFixed(1) + "s");
-      span.style.setProperty("--dx", rnd(-60, 60).toFixed(0) + "px");
-      span.style.setProperty("--dy", rnd(-60, 60).toFixed(0) + "px");
-      span.style.setProperty("--r", rnd(-25, 25).toFixed(0) + "deg");
-      span.style.color = colors[i % colors.length];
-      host.appendChild(span);
-    }
-  }
-
-  /* Конфетти при победе: чистый CSS, снимается само через ~3.5 с */
-  function celebrate() {
-    const box = el("div", { class: "confetti", "aria-hidden": "true" });
-    const colors = ["#3fa34d", "#56c266", "#e9c46a", "#ffffff", "#4c8ff0", "#8e94a3"];
-    for (let i = 0; i < 90; i++) {
-      const piece = el("i");
-      piece.style.left = (Math.random() * 100).toFixed(1) + "%";
-      piece.style.background = colors[i % colors.length];
-      piece.style.setProperty("--t", (2.2 + Math.random() * 1.6).toFixed(2) + "s");
-      piece.style.setProperty("--sway", (Math.random() * 120 - 60).toFixed(0) + "px");
-      piece.style.setProperty("--spin", (Math.random() * 720 - 360).toFixed(0) + "deg");
-      piece.style.animationDelay = (Math.random() * 0.4).toFixed(2) + "s";
-      box.appendChild(piece);
-    }
-    document.body.appendChild(box);
-    setTimeout(() => box.remove(), 4000);
+    return game;
   }
 
   /* ---------- Логика попытки ---------- */
@@ -215,12 +192,12 @@
     input = "";
     saveData();
     if (game.status === "playing") {
-      // Во время игры обновляем только доски и клавиатуру — без перестройки всего экрана
+      if (game.solvedAt[selectedBoard] !== null) selectedBoard = game.solvedAt.indexOf(null);
       drawBoards(game);
+      scrollToBoard(game);
     } else {
       render(); // игра окончена: показываем результат один раз
       showToast(game.status === "won" ? "Glückwunsch!" : "Leider verloren.");
-      if (game.status === "won") celebrate();
     }
   }
 
@@ -259,7 +236,7 @@
 
   function shakeRow(msg) {
     showToast(msg);
-    const row = document.querySelector(".row.current");
+    const row = document.querySelector(".board.is-selected .row.current");
     if (row) {
       row.classList.remove("shake");
       void row.offsetWidth; // перезапуск анимации
@@ -291,17 +268,6 @@
 
   /* ---------- Меню ---------- */
 
-  function hero() {
-    const letters = [["W", "c"], ["O", "p"], ["R", "a"], ["D", "c"], ["L", "p"], ["E", "c"]];
-    const tiles = el("div", { class: "hero-tiles", "aria-hidden": "true" },
-      letters.map(([ch, cls], i) => el("div", { class: "hero-tile " + cls, style: `animation-delay:${i * 0.08}s`, text: ch })));
-    return el("div", { class: "hero" }, [
-      tiles,
-      el("h1", { text: "Wordle & Quordle auf Deutsch" }),
-      el("p", { text: "Finde das deutsche Wort – allein oder vier auf einmal." }),
-    ]);
-  }
-
   /* Мини-превью режима: одна строка плиток (Wordle) или четыре мини-доски (Quordle) */
   function modePreview(mode) {
     if (mode === "wordle") {
@@ -313,102 +279,174 @@
       boards.map((row) => el("div", { class: "mq" }, row.map((c) => el("i", { class: "mt " + c })))));
   }
 
-  function modeCard(mode, title, desc, meta, primary) {
+  function modeCard(mode, daily, date) {
+    const info = L.MODES[mode];
+    const game = daily ? todayGame(mode, date) : null;
+    const state = game?.status === "playing" ? "Fortsetzen" : game ? statusLabel(game.status)
+      : `${info.boards} ${info.boards === 1 ? "Wort" : "Wörter"} · ${info.maxAttempts} Versuche`;
     return el("button", {
-      class: "mode-card" + (primary ? " primary" : ""),
-      onclick: () => newGame(mode),
+      class: daily ? "daily-card" : "mode-card",
+      type: "button",
+      disabled: daily && !game && dailyState !== "ready" ? true : null,
+      onclick: () => daily ? openDaily(mode) : newGame(mode),
     }, [
-      mode === "quordle" ? el("span", { class: "mode-badge", text: "4×" }) : null,
       modePreview(mode),
-      el("div", { class: "mode-body" }, [
-        el("div", { class: "mode-title", text: title }),
-        el("div", { class: "mode-desc", text: desc }),
+      el("span", { class: "mode-body" }, [
+        el("strong", { text: info.label }),
+        el("span", { class: "muted", text: state }),
       ]),
-      el("div", { class: "mode-meta", text: meta }),
+      el("span", { class: "mode-arrow", "aria-hidden": "true", text: "↗" }),
     ]);
   }
 
+  let menuDay = "";
   function renderMenu() {
     document.body.classList.remove("is-play");
-    const cur = playingGame();
+    const cur = randomGame();
+    const date = menuDay = L.dailyDate();
+    const longDate = new Intl.DateTimeFormat("de-DE", {
+      timeZone: "Europe/Berlin", weekday: "long", day: "numeric", month: "long",
+    }).format(new Date(date + "T12:00:00Z"));
     const wrap = el("div", { class: "view view-menu" });
-    wrap.appendChild(hero());
-
-    if (cur) {
-      const solved = cur.solvedAt.filter((x) => x !== null).length;
-      wrap.appendChild(el("a", { class: "card continue", href: "#play", "aria-label": "Laufendes Spiel fortsetzen" }, [
-        el("div", null, [
-          el("div", { class: "t", text: "Laufendes Spiel fortsetzen" }),
-          el("div", { class: "muted small", text: `${modeLabel(cur.mode)} · Versuch ${cur.guesses.length + 1}/${cur.maxAttempts} · ${solved}/${cur.answers.length} gelöst` }),
+    wrap.append(
+      el("section", { class: "hero" }, [
+        el("h1", null, ["Wordle & Quordle", el("span", { text: "auf Deutsch." })]),
+      ]),
+      el("section", { class: "daily-panel", "aria-labelledby": "today-title" }, [
+        el("div", { class: "section-head" }, [
+          el("h2", { id: "today-title", text: "Heute" }),
+          el("time", { datetime: date, text: longDate }),
         ]),
-        el("span", { class: "btn primary", text: "Weiter ›" }),
-      ]));
-    }
-
-    wrap.appendChild(el("div", { class: "mode-grid" }, [
-      modeCard("wordle", "Wordle", "Ein Wort in 6 Versuchen.", "1 Wort · 6 Versuche", !cur),
-      modeCard("quordle", "Quordle", "Vier Wörter gleichzeitig in 9 Versuchen.", "4 Wörter · 9 Versuche", false),
-    ]));
-
-    wrap.appendChild(el("div", { class: "secondary" }, [
-      el("a", { class: "chip", href: "#stats", text: "Verlauf & Statistik" }),
-      el("a", { class: "chip", href: "#rules", text: "Spielregeln" }),
-    ]));
-    wrap.appendChild(el("p", { class: "muted small center", text: `${GUESS_SET.size} gültige Wörter · ${ANSWERS.length} mögliche Lösungen` }));
+        el("div", { class: "mode-grid" }, [modeCard("wordle", true, date), modeCard("quordle", true, date)]),
+        dailyState === "error" ? el("p", { class: "muted", text: "Das Tagesrätsel konnte nicht geladen werden." }) : null,
+      ]),
+      el("section", { class: "free-panel", "aria-labelledby": "free-title" }, [
+        el("div", { class: "section-head" }, [el("h2", { id: "free-title", text: "Freies Spiel" })]),
+        cur ? el("a", { class: "continue", href: playUrl(cur), "aria-label": "Laufendes Spiel fortsetzen" }, [
+          el("strong", { text: `${modeLabel(cur.mode)} fortsetzen` }),
+          el("span", { class: "muted", text: `Versuch ${cur.guesses.length + 1} von ${cur.maxAttempts} ›` }),
+        ]) : null,
+        el("div", { class: "mode-grid" }, [modeCard("wordle", false), modeCard("quordle", false)]),
+      ]),
+    );
     setView(wrap);
   }
 
   function newGame(mode) {
     if (dictionaryState !== "ready") return;
-    const cur = playingGame();
+    const cur = randomGame();
     if (cur && !window.confirm("Das laufende Spiel wird als abgebrochen gespeichert. Neues Spiel starten?")) return;
     updateData(() => {
-      if (playingGame()?.id !== cur?.id) {
+      const current = randomGame();
+      if (current?.id !== cur?.id) {
         input = "";
         render();
         return showToast("Das laufende Spiel hat sich geändert.");
       }
-      startNewGame(mode);
-      if (location.hash === "#play") render();
-      else location.hash = "#play";
+      const { words, reset } = L.pickWords(ANSWERS, L.MODES[mode].boards, data.used);
+      if (current) finishGame(current, "aborted");
+      data.used = (reset ? [] : data.used).concat(words);
+      goToGame(addGame(mode, words));
+    });
+  }
+
+  function openDaily(mode) {
+    if (dictionaryState !== "ready") return;
+    updateData(() => {
+      const date = L.dailyDate();
+      const existing = todayGame(mode, date);
+      if (existing) return goToGame(existing);
+      if (dailyState === "ready") goToGame(addGame(mode, L.dailyWords(DAILY_WORDS, mode, date), date));
     });
   }
 
   /* ---------- Игра ---------- */
 
   function renderPlay() {
-    const active = playingGame();
-    const g = active || lastFinishedGame();
+    const g = routedGame();
     if (!g) return renderMenu();
+    if (g.id !== visibleGameId) {
+      visibleGameId = g.id;
+      input = "";
+      selectedBoard = Math.max(0, g.solvedAt.indexOf(null));
+    }
 
     const playing = g.status === "playing";
     const n = g.answers.length;
     document.body.classList.toggle("is-play", playing);
 
-    const view = el("div", { class: "view-play" });
+    const view = el("div", { class: "view-play" + (playing && n > 1 ? " is-quordle" : "") });
     view.appendChild(el("div", { class: "play-bar" }, [
       el("a", { class: "icon-btn", href: "#menu", text: "‹ Menü" }),
       el("div", { class: "play-info" }, [
-        el("strong", { text: modeLabel(g.mode) }),
-        el("span", { id: "play-attempt", text: playing
-          ? `Versuch ${g.guesses.length + 1} von ${g.maxAttempts}`
-          : `${statusLabel(g.status)} · ${g.guesses.length}/${g.maxAttempts} Versuche` }),
+        el("strong", { text: g.dailyDate ? `${modeLabel(g.mode)} · Tagesrätsel` : modeLabel(g.mode) }),
+        playing ? el("span", { id: "play-attempt", text: `Versuch ${g.guesses.length + 1} von ${g.maxAttempts}` }) : null,
       ]),
-      playing
-        ? el("button", { class: "icon-btn", text: "Neu starten", title: "Laufendes Spiel abbrechen und neu beginnen", onclick: () => newGame(g.mode) })
-        : el("button", { class: "icon-btn primary", text: "Neue Runde", onclick: () => newGame(g.mode) }),
+      g.dailyDate ? el("time", { datetime: g.dailyDate, class: "puzzle-date", text: g.dailyDate.split("-").slice(1).reverse().join(".") + "." })
+        : playing ? el("button", { class: "icon-btn", text: "Neu starten", onclick: () => newGame(g.mode) }) : el("span"),
     ]));
 
+    if (!playing) {
+      view.appendChild(buildResult(g));
+      setView(view);
+      return;
+    }
+
+    if (n > 1) view.appendChild(boardPicker(g, selectedBoard, (index) => {
+      selectedBoard = index;
+      const latest = routedGame();
+      if (latest) {
+        drawBoards(latest);
+        scrollToBoard(latest);
+      }
+    }, "play-pick"));
     const scroll = el("div", { class: "play-scroll" });
     scroll.appendChild(el("div", { id: "boards", class: "boards " + (n > 1 ? "quad" : "single") }));
-    if (!playing) scroll.appendChild(buildResult(g));
     view.appendChild(scroll);
 
-    if (playing) {
-      view.appendChild(el("div", { class: "keyboard-dock" }, [buildKeyboard()]));
-    }
+    view.appendChild(el("div", { class: "keyboard-dock" }, [
+      n > 1 ? el("div", { class: "keyboard-guide" }, [
+        el("span", { class: "keyboard-guide-map", "aria-hidden": "true" },
+          [1, 2, 3, 4].map((number) => el("span", { text: number }))),
+        el("p", { text: "Die vier Ecken jeder Taste entsprechen den vier Wörtern." }),
+      ]) : null,
+      buildKeyboard(n),
+    ]));
     setView(view);
     drawBoards(g);
+    scrollToBoard(g);
+  }
+
+  function boardPicker(game, selected, onSelect, className) {
+    return el("div", { class: "board-picker " + className, role: "group", "aria-label": "Wort auswählen" },
+      game.answers.map((_, index) => el("button", {
+        type: "button", class: "board-switch", "data-board-pick": index, "aria-pressed": selected === index,
+        onclick: () => onSelect(index),
+      }, [el("span", { text: `Wort ${index + 1}` }), el("span", {
+        class: "board-switch-state", text: boardState(game, index),
+      })])));
+  }
+
+  function boardState(game, index) {
+    if (game.solvedAt[index] !== null) return "Gelöst";
+    return game.status === "playing" ? "Offen" : "Ungelöst";
+  }
+
+  function updateBoardPicker(picker, game, selected) {
+    picker?.querySelectorAll("[data-board-pick]").forEach((button, index) => {
+      const solved = game.solvedAt[index] !== null;
+      button.setAttribute("aria-pressed", selected === index);
+      button.classList.toggle("is-solved", solved);
+      button.querySelector(".board-switch-state").textContent = boardState(game, index);
+    });
+  }
+
+  function scrollToBoard(game) {
+    requestAnimationFrame(() => {
+      if (routedGame()?.id !== game.id) return;
+      const board = document.querySelector(`#boards [data-board="${selectedBoard}"]`);
+      (board?.querySelector(".row.current") || board)?.scrollIntoView({ block: "nearest" });
+    });
   }
 
   function drawBoards(g) {
@@ -420,7 +458,8 @@
 
     g.answers.forEach((ans, b) => {
       const solvedAt = g.solvedAt[b];
-      const boardEl = el("div", { class: "board" });
+      const boardEl = el("div", { class: "board" + (selectedBoard === b ? " is-selected" : ""),
+        "data-board": b, role: "group", "aria-label": `Wort ${b + 1}` });
       if (g.answers.length > 1) {
         let title = `Wort ${b + 1}`;
         if (solvedAt !== null) title = `✔ ${upper(ans)} · Versuch ${solvedAt}`;
@@ -474,6 +513,7 @@
     });
 
     boards.replaceChildren(...nodes);
+    updateBoardPicker(document.querySelector(".play-pick"), g, selectedBoard);
     // Одноразовые флаги: после отрисовки анимации не должны повторяться
     freshRows.clear();
     freshWin.clear();
@@ -497,12 +537,20 @@
     return b;
   }
 
-  function buildKeyboard() {
+  const TILE_LABELS = { correct: "richtig", present: "andere Stelle", absent: "fehlt" };
+
+  function buildKeyboard(boardCount) {
     const kb = el("div", { class: "keyboard", id: "keyboard" });
     KEYBOARD_ROWS.forEach((keys, idx) => {
       const row = el("div", { class: "kb-row" });
       if (idx === 2) row.appendChild(keyIcon("Enter", "Eingeben", ICON_ENTER, () => handleKey("Enter")));
-      keys.forEach((k) => row.appendChild(el("button", { class: "key", text: k === "ß" ? "ẞ" : k, "data-key": k, onclick: () => handleKey(k) })));
+      keys.forEach((k) => {
+        const sectors = boardCount > 1 ? el("span", { class: "key-sectors", "aria-hidden": "true" },
+          Array.from({ length: boardCount }, () => el("i"))) : null;
+        row.appendChild(el("button", { class: "key letter-key", type: "button", "data-key": k, onclick: () => handleKey(k) }, [
+          sectors, el("span", { class: "key-letter", text: L.displayLetter(k) }),
+        ]));
+      });
       if (idx === 2) row.appendChild(keyIcon("Backspace", "Löschen", ICON_BACK, () => handleKey("Backspace")));
       kb.appendChild(row);
     });
@@ -512,11 +560,24 @@
   function refreshKeyboard(g) {
     const kb = document.getElementById("keyboard");
     if (!kb) return;
-    const st = L.keyboardStatuses(g.guesses);
-    kb.querySelectorAll(".key[data-key]").forEach((btn) => {
+    const states = g.answers.map((_, board) => L.keyboardStatuses(g.guesses, board));
+    kb.querySelectorAll(".letter-key").forEach((btn) => {
       const k = btn.getAttribute("data-key");
-      btn.classList.remove("correct", "present", "absent");
-      if (st[k]) btn.classList.add(st[k]);
+      const label = L.displayLetter(k);
+      if (states.length === 1) {
+        btn.classList.remove("correct", "present", "absent");
+        const status = states[0][k];
+        if (status) btn.classList.add(status);
+        btn.setAttribute("aria-label", status ? `${label}, ${TILE_LABELS[status]}` : label);
+      } else {
+        const statuses = [];
+        btn.querySelectorAll(".key-sectors i").forEach((sector, i) => {
+          const status = states[i][k];
+          sector.className = status || "";
+          statuses.push(`Wort ${i + 1}: ${status ? TILE_LABELS[status] : "offen"}`);
+        });
+        btn.setAttribute("aria-label", [label, ...statuses].join(", "));
+      }
     });
   }
 
@@ -538,47 +599,90 @@
     const solved = g.solvedAt.filter((x) => x !== null).length;
     const won = g.status === "won";
     const n = g.answers.length;
-    const box = el("section", { class: "card result" });
+    const box = el("section", { class: "result" });
     box.appendChild(el("div", { class: "result-head" }, [
-      el("div", { class: "result-emoji", text: won ? "🎉" : "🙁" }),
-      el("div", null, [
-        el("h2", { text: won ? "Geschafft!" : "Schade, das war's." }),
-        el("p", { class: "muted", text: `${solved} von ${n} ${n > 1 ? "Wörtern" : "Wort"} in ${g.guesses.length} von ${g.maxAttempts} Versuchen erraten.` }),
-      ]),
+      el("h1", { text: won ? "Geschafft!" : g.status === "aborted" ? "Runde abgebrochen" : "Schade, das war’s." }),
+      el("p", { class: "muted", text: (n > 1 ? `${solved} von ${n} Wörtern · ` : "") +
+        `${g.guesses.length} von ${g.maxAttempts} Versuchen` }),
     ]));
-    box.appendChild(ringRow(g));
-    box.appendChild(el("h2", { text: n > 1 ? "Lösungen & Bedeutung" : "Lösung & Bedeutung" }));
-    g.answers.forEach((ans) => box.appendChild(buildExplanation(ans)));
+    const share = g.dailyDate ? el("textarea", { class: "share-result", readonly: true, hidden: true,
+      rows: 6, "aria-label": "Ergebnis zum Kopieren" }) : null;
     box.appendChild(el("div", { class: "btn-row" }, [
-      el("button", { class: "btn primary", text: "Neue Runde", onclick: () => newGame(g.mode) }),
+      g.dailyDate ? el("button", { class: "btn primary", text: "Ergebnis kopieren", onclick: () => copyDailyResult(g, share) }) : null,
+      el("button", { class: g.dailyDate ? "btn" : "btn primary", text: g.dailyDate ? "Freies Spiel" : "Neue Runde", onclick: () => newGame(g.mode) }),
       el("a", { class: "btn", href: "#stats", text: "Verlauf" }),
-      el("a", { class: "btn", href: "#menu", text: "Menü" }),
     ]));
+    if (share) box.appendChild(share);
+    box.appendChild(el("section", { class: "result-words" }, [
+      el("h2", { text: n > 1 ? "Lösungen" : "Lösung" }),
+      el("div", { class: "word-grid" }, g.answers.map((ans, index) =>
+        buildExplanation(ans, g.solvedAt[index] ? `Versuch ${g.solvedAt[index]}` : "Nicht gelöst"))),
+    ]));
+    const review = el("details", { class: "result-review" }, [el("summary", { text: "Spiel analysieren" })]);
+    review.addEventListener("toggle", () => {
+      if (review.open && review.childElementCount === 1) review.appendChild(buildReplay(g));
+    });
+    box.appendChild(review);
     return box;
   }
 
-  /* Кольцо на каждое слово: заполнено, если угадано, с номером попытки */
-  function ringRow(g) {
-    const row = el("div", { class: "ring-row" });
-    g.answers.forEach((ans, i) => {
-      const at = g.solvedAt[i];
-      const solved = at !== null;
-      const ring = el("div", { class: "ring" }, [el("span", { text: solved ? String(at) : "–" })]);
-      ring.style.setProperty("--p", solved ? "100" : "0");
-      row.appendChild(el("div", { class: "ring-item" + (solved ? " solved" : "") }, [
-        ring,
-        el("div", { class: "ring-label", text: solved ? `${upper(ans)} · Versuch ${at}` : `${upper(ans)} · offen` }),
-      ]));
-    });
-    return row;
+  async function copyDailyResult(game, fallback) {
+    const url = new URL(location.href);
+    url.hash = "";
+    url.search = "";
+    const text = L.dailyShareText(game) + "\n\n" + url.href;
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast("Ergebnis kopiert.");
+    } catch {
+      fallback.value = text;
+      fallback.hidden = false;
+      fallback.focus();
+      fallback.select();
+    }
   }
 
-  function buildExplanation(word) {
-    const pos = el("span", { class: "pos", hidden: true });
+  function updateSaveButton(button) {
+    const saved = data.savedWords.includes(button.dataset.saveWord);
+    button.textContent = saved ? "Gemerkt" : "Merken";
+    button.setAttribute("aria-pressed", saved);
+  }
+
+  function toggleSavedWord(word) {
+    updateData(() => {
+      const saved = data.savedWords.includes(word);
+      data.savedWords = saved ? data.savedWords.filter((item) => item !== word) : [word, ...data.savedWords];
+      saveData();
+      if (location.hash === "#vocab") {
+        renderVocabulary();
+        document.querySelector(".vocab-entry summary, .view-vocabulary h1")?.focus();
+      } else {
+        document.querySelectorAll("[data-save-word]").forEach(updateSaveButton);
+      }
+      showToast(saved ? "Aus dem Wortschatz entfernt." : "Im Wortschatz gespeichert.");
+    });
+  }
+
+  let playingAudio;
+  function playPronunciation(url) {
+    playingAudio?.pause();
+    playingAudio = new Audio(url);
+    playingAudio.play().catch(() => showToast("Die Aussprache konnte nicht abgespielt werden."));
+  }
+
+  function buildExplanation(word, meta = "") {
+    const title = el("h3", { class: "word", text: L.displayLetter(word[0]) + word.slice(1) });
+    const plural = el("p", { class: "word-plural", hidden: true });
+    const actions = el("div", { class: "word-actions" });
+    const mark = el("button", { class: "btn small", type: "button", "data-save-word": word, onclick: () => toggleSavedWord(word) });
+    updateSaveButton(mark);
+    actions.appendChild(mark);
     const content = el("div", null, [el("span", { class: "muted small", text: "lädt Bedeutung …" })]);
-    const holder = el("div", { class: "explain" }, [
-      el("span", { class: "word", text: upper(word) }),
-      pos,
+    const holder = el("article", { class: "explain" }, [
+      el("header", { class: "word-head" }, [
+        el("div", null, [meta ? el("p", { class: "word-meta", text: meta }) : null, title, plural]),
+        actions,
+      ]),
       content,
     ]);
     const loadWikipediaImage = () => {
@@ -588,19 +692,48 @@
       });
     };
     EX.getExplanation(word).then((r) => {
-      pos.textContent = r.wortart;
-      pos.hidden = !r.wortart;
+      if (r.grammar?.singular) title.textContent = r.grammar.singular;
+      if (r.grammar?.plurals.length) {
+        plural.textContent = "Plural: " + r.grammar.plurals.join(", ");
+        plural.hidden = false;
+      }
+      if (r.audio) actions.prepend(el("button", { class: "btn small", type: "button", text: "Anhören",
+        "aria-label": `${title.textContent} anhören`, onclick: () => playPronunciation(r.audio.url) }));
       let definition;
       if (r.ok) {
         definition = el("ol", null, r.defs.map((d) => el("li", { text: d })));
       } else {
         definition = el("p", { class: "muted small", text: "Keine Bedeutung gefunden (offline oder nicht im Wiktionary)." });
       }
-      content.replaceChildren(definition, el("a", { href: r.url, target: "_blank", rel: "noopener", text: "Wiktionary ↗" }));
+      content.replaceChildren(definition, el("div", { class: "word-sources" }, [
+        el("a", { href: r.url, target: "_blank", rel: "noopener", text: "Wiktionary ↗" }),
+        r.audio ? el("a", { href: r.audio.page, target: "_blank", rel: "noopener", text: "Audioquelle ↗" }) : null,
+      ]));
       if (r.image && holder.isConnected) content.before(imageBlock(r.image, loadWikipediaImage));
       else loadWikipediaImage();
     });
     return holder;
+  }
+
+  function renderVocabulary() {
+    document.body.classList.remove("is-play");
+    const view = el("div", { class: "view view-vocabulary" }, [
+      el("header", { class: "page-heading" }, [el("h1", { tabindex: -1, text: "Wortschatz" }),
+        el("p", { class: "muted", text: `${data.savedWords.length} ${data.savedWords.length === 1 ? "gemerktes Wort" : "gemerkte Wörter"}` })]),
+    ]);
+    if (!data.savedWords.length) {
+      view.appendChild(el("p", { class: "card muted", text: "Merke Wörter nach einer Runde oder im Verlauf." }));
+    }
+    for (const word of data.savedWords) {
+      const entry = el("details", { class: "vocab-entry" }, [
+        el("summary", { text: L.displayLetter(word[0]) + word.slice(1) }),
+      ]);
+      entry.addEventListener("toggle", () => {
+        if (entry.open && entry.childElementCount === 1) entry.appendChild(buildExplanation(word));
+      });
+      view.appendChild(entry);
+    }
+    setView(view);
   }
 
   /* Миниатюра и увеличенная версия используют запасные URL Wikimedia. */
@@ -622,9 +755,9 @@
   function imageBlock(img, onUnavailable) {
     const figure = el("figure", { class: "ex-fig" }, [
       el("figcaption", { class: "ex-cap" }, [
-        el("div", { class: "ex-cap-title", text: img.title }),
         img.description ? el("div", { class: "muted small", text: img.description }) : null,
-        el("a", { href: img.page, target: "_blank", rel: "noopener", text: (img.source || "Wikipedia") + " ↗" }),
+        el("a", { href: img.page, target: "_blank", rel: "noopener", text: "Bildquelle ↗",
+          "aria-label": `Bildquelle: ${img.source || "Wikipedia"}` }),
       ]),
     ]);
     const thumbnail = wikimediaImage(img, false, () => {
@@ -638,11 +771,13 @@
 
   function openLightbox(img) {
     const onKey = (e) => { if (e.key === "Escape") close(); };
+    const trigger = document.activeElement;
     let box = null;
     function close() {
       document.removeEventListener("keydown", onKey);
       if (box) box.remove();
       box = null;
+      if (trigger?.isConnected) trigger.focus();
     }
     const image = wikimediaImage(img, true, () => image.replaceWith(el("p", { text: "Das Bild konnte nicht geladen werden." })));
     box = el("div", {
@@ -664,6 +799,7 @@
       ]),
     ]);
     document.body.appendChild(box);
+    box.querySelector(".lb-close").focus();
     document.addEventListener("keydown", onKey);
   }
 
@@ -708,8 +844,8 @@
         el("h2", { text: "Letzte Spiele" }),
         last.length ? spark : el("p", { class: "muted", text: "Noch keine beendeten Spiele." }),
         el("div", { class: "legend" }, [
-          el("span", null, [el("i", { style: "background:#56c266" }), "Wordle"]),
-          el("span", null, [el("i", { style: "background:linear-gradient(180deg,#e9c46a,#b08a3a)" }), "Quordle"]),
+        el("span", null, [el("i", { class: "wordle" }), "Wordle"]),
+        el("span", null, [el("i", { class: "quordle" }), "Quordle"]),
           el("span", { class: "muted", text: "Höhe = gelöste Wörter" }),
         ]),
       ]),
@@ -732,7 +868,7 @@
     const avg = wonWordle.length ? (wonWordle.reduce((a, b) => a + b, 0) / wonWordle.length).toFixed(1) : "–";
 
     const wrap = el("div", { class: "view" });
-    wrap.appendChild(el("h1", { text: "Verlauf & Statistik" }));
+    wrap.appendChild(el("header", { class: "page-heading" }, [el("h1", { text: "Verlauf & Statistik" })]));
     wrap.appendChild(el("div", { class: "stat-grid" }, [
       statBox(finished.length, "Spiele beendet"),
       statBox(won.length, "Siege"),
@@ -745,37 +881,11 @@
 
     wrap.appendChild(statsCharts(finished));
 
-    wrap.appendChild(el("h2", { text: "Alle Spiele" }));
+    wrap.appendChild(el("h2", { class: "history-heading", text: "Alle Spiele" }));
     if (!data.games.length) {
       wrap.appendChild(el("p", { class: "muted", text: "Noch keine Spiele. Starte im Menü eine Runde!" }));
     } else {
-      const tbody = el("tbody");
-      data.games.slice().reverse().forEach((g) => {
-        const solved = g.solvedAt.filter((x) => x !== null).length;
-        const detailsList = el("ul", { class: "progress-list" });
-        if (!g.progress.length) detailsList.appendChild(el("li", { text: "Keine Versuche." }));
-        g.progress.forEach((p) => {
-          detailsList.appendChild(el("li", { text: `Versuch ${p.attempt}: ${p.solved} von ${g.answers.length} Wörtern gelöst (${fmtDate(p.at)})` }));
-        });
-        const details = el("details", null, [
-          el("summary", { text: "Verlauf" }),
-          detailsList,
-        ]);
-        tbody.appendChild(el("tr", null, [
-          el("td", { "data-label": "Datum", text: fmtDate(g.startedAt) }),
-          el("td", { "data-label": "Modus", text: modeLabel(g.mode) }),
-          el("td", { "data-label": "Ergebnis" }, [el("span", { class: "badge " + g.status, text: statusLabel(g.status) })]),
-          el("td", { "data-label": "Gelöst", text: `${solved}/${g.answers.length} · ${g.guesses.length}/${g.maxAttempts}` }),
-          el("td", { "data-label": "Details" }, [details]),
-        ]));
-        if (g.status !== "playing") tbody.appendChild(addHistoryAnswers(details, g));
-      });
-      wrap.appendChild(el("div", { class: "table-wrap" }, [
-        el("table", null, [
-          el("thead", null, [el("tr", null, ["Datum", "Modus", "Ergebnis", "Gelöst", "Details"].map((t) => el("th", { text: t })))]),
-          tbody,
-        ]),
-      ]));
+      wrap.appendChild(el("div", { class: "history-list" }, data.games.slice().reverse().map(historyEntry)));
     }
 
     wrap.appendChild(el("div", { class: "btn-row" }, [
@@ -784,7 +894,7 @@
         class: "btn danger",
         text: "Alle Daten löschen",
         onclick: () => {
-          if (window.confirm("Alle gespeicherten Spiele und Statistiken wirklich löschen?")) {
+          if (window.confirm("Alle Spiele, Statistiken und gemerkten Wörter wirklich löschen?")) {
             updateData(() => {
               data = emptyData();
               input = "";
@@ -799,26 +909,81 @@
     setView(wrap);
   }
 
-  function addHistoryAnswers(details, game) {
-    const explBox = el("div", { class: "word-list" });
-    const exRow = el("tr", { class: "ex-row", hidden: true }, [el("td", { colspan: "5" }, [explBox])]);
-    let explOpen = false;
-    const syncExplRow = () => { exRow.hidden = !(explOpen && details.open); };
-    const explBtn = el("button", { class: "btn small", text: "Bedeutungen anzeigen" });
-    explBtn.addEventListener("click", () => {
-      if (!explBox.hasChildNodes()) game.answers.forEach((w) => explBox.appendChild(buildExplanation(w)));
-      explOpen = !explOpen;
-      explBtn.textContent = explOpen ? "Bedeutungen ausblenden" : "Bedeutungen anzeigen";
-      syncExplRow();
+  function historyEntry(game) {
+    const summary = el("summary", null, [
+      el("span", { class: "history-title" }, [
+        el("strong", { text: modeLabel(game.mode) + (game.dailyDate ? " · Tagesrätsel" : "") }),
+        el("span", { class: "muted", text: fmtDate(game.startedAt) }),
+      ]),
+      el("span", { class: "badge " + game.status, text: statusLabel(game.status) }),
+      el("span", { class: "history-score", text: `${game.guesses.length}/${game.maxAttempts}`, title: "Versuche" }),
+    ]);
+    const details = el("details", { class: "history-entry" }, [summary]);
+    details.addEventListener("toggle", () => {
+      if (!details.open || details.childElementCount > 1) return;
+      const body = el("div", { class: "history-body" });
+      if (game.status === "playing") {
+        body.appendChild(el("ul", { class: "progress-list" }, game.progress.length
+          ? game.progress.map((p) => el("li", { text: `Versuch ${p.attempt}: ${p.solved} von ${game.answers.length} Wörtern gelöst (${fmtDate(p.at)})` }))
+          : [el("li", { text: "Keine Versuche." })]));
+        body.appendChild(el("a", { class: "btn", href: playUrl(game), text: "Fortsetzen" }));
+      } else {
+        body.appendChild(buildReplay(game));
+        const words = game.answers.map((w, i) => game.solvedAt[i] !== null
+          ? `${upper(w)} (Versuch ${game.solvedAt[i]})` : `${upper(w)} (nicht gelöst)`);
+        const list = el("div", { class: "word-grid history-words", hidden: true });
+        const toggle = el("button", { class: "btn small", type: "button", text: "Bedeutungen anzeigen",
+          "aria-expanded": "false", onclick: () => {
+            if (!list.hasChildNodes()) list.append(...game.answers.map((word) => buildExplanation(word)));
+            list.hidden = !list.hidden;
+            toggle.textContent = list.hidden ? "Bedeutungen anzeigen" : "Bedeutungen ausblenden";
+            toggle.setAttribute("aria-expanded", !list.hidden);
+          } });
+        body.append(el("p", { class: "muted small", text: "Wörter: " + words.join(", ") }), toggle, list);
+      }
+      details.appendChild(body);
     });
-    const words = game.answers.map((w, i) =>
-      game.solvedAt[i] !== null ? `${upper(w)} (Versuch ${game.solvedAt[i]})` : `${upper(w)} (nicht gelöst)`);
-    details.append(
-      el("div", { class: "muted small", style: "margin-top:8px", text: "Wörter: " + words.join(", ") }),
-      el("div", { style: "margin-top:8px" }, [explBtn]),
-    );
-    details.addEventListener("toggle", syncExplRow);
-    return exRow;
+    return details;
+  }
+
+  function buildReplay(game) {
+    let board = 0;
+    const lastAttempt = () => game.solvedAt[board] ?? game.guesses.length;
+    let step = lastAttempt();
+    const wrap = el("section", { class: "replay", "aria-label": "Spielanalyse" });
+    const field = el("div", { class: "replay-grid" });
+    const position = el("p", { class: "replay-position", "aria-live": "polite" });
+    const previous = el("button", { class: "btn small", type: "button", text: "‹ Zurück", onclick: () => { step--; draw(); } });
+    const next = el("button", { class: "btn small", type: "button", text: "Weiter ›", onclick: () => { step++; draw(); } });
+    const picker = game.answers.length > 1 ? boardPicker(game, board, (index) => {
+      board = index;
+      step = lastAttempt();
+      draw();
+    }, "replay-pick") : null;
+    const answer = el("h3", { class: "replay-answer" });
+    if (picker) wrap.appendChild(picker);
+    wrap.append(answer, field, el("div", { class: "replay-controls" }, [previous, position, next]));
+    function draw() {
+      updateBoardPicker(picker, game, board);
+      answer.textContent = upper(game.answers[board]);
+      const rows = [];
+      game.guesses.slice(0, step).forEach((guess, index) => {
+        const result = guess.results[board];
+        if (!result) return;
+        rows.push(el("div", { class: "row", "aria-label": `Versuch ${index + 1}` },
+          Array.from(guess.word).map((letter, column) => el("span", {
+            class: "tile " + result[column], text: L.displayLetter(letter),
+            "aria-label": `${L.displayLetter(letter)}: ${TILE_LABELS[result[column]]}`,
+          }))));
+      });
+      field.replaceChildren(...rows);
+      const max = lastAttempt();
+      position.textContent = max ? `Versuch ${step} von ${max}` : "Keine Versuche";
+      previous.disabled = step <= 1;
+      next.disabled = step >= max;
+    }
+    draw();
+    return wrap;
   }
 
   /* ---------- Regeln ---------- */
@@ -826,7 +991,7 @@
   function renderRules() {
     document.body.classList.remove("is-play");
     const sw = (cls, text) => el("li", null, [el("span", { class: "mode-icons", style: "display:inline-flex;margin-right:8px;vertical-align:middle" }, [el("i", { class: cls, style: "width:16px;height:16px;border-radius:4px;display:block" })]), text]);
-    const wrap = el("div", { class: "view card" }, [
+    const wrap = el("div", { class: "view card rules" }, [
       el("h1", { text: "Spielregeln" }),
       el("p", null, [el("strong", { text: "Wordle: " }), "Errate das 5-buchstabige deutsche Wort in höchstens 6 Versuchen."]),
       el("p", null, [el("strong", { text: "Quordle: " }), "Errate gleichzeitig 4 Wörter in höchstens 9 Versuchen. Jeder Tipp gilt für alle noch offenen Wörter."]),
@@ -836,6 +1001,7 @@
         sw("a", "Grau: der Buchstabe kommt im Wort nicht vor."),
       ]),
       el("p", { class: "muted", text: "Nur Wörter aus der Wortliste sind erlaubt. Ä, Ö, Ü und ß sind eigene Buchstaben." }),
+      el("p", { class: "muted", text: "Das Tagesrätsel ist für alle gleich. Neue Rätsel gibt es um Mitternacht in Berlin. Im freien Spiel kannst du jederzeit eine neue Runde starten." }),
       el("p", { class: "muted", text: "Am Ende siehst du die Lösung und ihre Bedeutung. Alle Spiele und Versuche werden im Verlauf gespeichert." }),
       el("div", { class: "btn-row" }, [el("a", { class: "btn primary", href: "#menu", text: "Zum Menü" })]),
     ]);
@@ -846,8 +1012,13 @@
 
   function render() {
     const h = (location.hash || "#menu").replace("#", "");
-    document.querySelectorAll(".topnav a").forEach((a) => a.classList.toggle("active", a.getAttribute("href") === "#" + h));
+    document.querySelectorAll(".topnav a").forEach((a) => {
+      const active = a.getAttribute("href") === "#" + h;
+      if (active) a.setAttribute("aria-current", "page");
+      else a.removeAttribute("aria-current");
+    });
     if (h === "stats") return renderStats();
+    if (h === "vocab") return renderVocabulary();
     if (h === "rules") return renderRules();
     if (dictionaryState !== "ready") {
       document.body.classList.remove("is-play");
@@ -856,21 +1027,28 @@
         : "Die Wortliste konnte nicht geladen werden. Bitte lade die Seite neu.";
       return setView(el("p", { class: "loading", role: "status", text }));
     }
-    if (h === "play") return renderPlay();
+    if (h === "play" || h.startsWith("play/")) return renderPlay();
     return renderMenu();
   }
 
   document.addEventListener("keydown", (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
-    if (dictionaryState !== "ready" || location.hash !== "#play") return;
+    if (e.defaultPrevented || document.querySelector(".lightbox")) return;
+    if (dictionaryState !== "ready") return;
     const g = playingGame();
     if (!g) return;
+    if (e.key === "Enter" && input.length < L.WORD_LENGTH && e.target.closest?.("button:not(.key), a, summary")) return;
     if (e.key === "Enter") { e.preventDefault(); return handleKey("Enter"); }
     if (e.key === "Backspace") { e.preventDefault(); return handleKey("Backspace"); }
     if (/^[a-zA-ZäöüÄÖÜßẞ]$/.test(e.key)) { e.preventDefault(); handleKey(e.key); }
   });
 
   window.addEventListener("hashchange", render);
+  function refreshMenuDate() {
+    if (dictionaryState === "ready" && (!location.hash || location.hash === "#menu") && menuDay !== L.dailyDate()) renderMenu();
+  }
+  window.addEventListener("focus", refreshMenuDate);
+  setInterval(refreshMenuDate, 60_000);
   window.addEventListener("storage", (event) => {
     if (sessionOnly || (event.key !== STORAGE_KEY && event.key !== null)) return;
     const latest = loadData();
@@ -894,6 +1072,13 @@
       return list;
     };
     render();
+    loadWords("data/daily-words.json").then((words) => {
+      if (words.length < L.MODES.quordle.boards) throw new Error("The daily word pool is incomplete.");
+      DAILY_WORDS = words;
+      dailyState = "ready";
+    }).catch(() => { dailyState = "error"; }).finally(() => {
+      if (dictionaryState === "ready" && (!location.hash || location.hash === "#menu")) renderMenu();
+    });
     try {
       const [answers, guesses] = await Promise.all([
         loadWords("data/answers.json"),
@@ -909,9 +1094,8 @@
     } catch {
       dictionaryState = "error";
     }
-    render();
+    if (!["#stats", "#rules", "#vocab"].includes(location.hash)) render();
   }
 
   init();
-  buildBackground();
 })();
