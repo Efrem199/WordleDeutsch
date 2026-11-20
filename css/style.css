@@ -108,11 +108,16 @@ h3 { font-size: 16px; }
 .footer {
   width: min(100% - 48px, var(--page));
   align-self: center;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 16px;
   padding: 18px 0 calc(20px + env(safe-area-inset-bottom));
   border-top: 1px solid var(--border);
   color: var(--muted);
   font-size: .75rem;
   line-height: 1.7;
+  text-align: center;
 }
 .footer a { color: inherit; }
 .storage-notice { padding: 5px 16px; color: var(--muted); text-align: center; font-size: .8rem; }

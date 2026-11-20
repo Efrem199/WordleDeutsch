@@ -185,6 +185,55 @@ test("floating background letters respect reduced motion and never capture click
   await expect(page.getByText("Versuch 1 von 6")).toBeVisible();
 });
 
+test("a small touch screen can reach the centered footer, play, and open a replay", async ({ browser, baseURL }) => {
+  const context = await browser.newContext({
+    baseURL, isMobile: true, hasTouch: true, viewport: { width: 320, height: 568 },
+  });
+  try {
+    await installExternalFixtures(context);
+    const page = await context.newPage();
+    await page.route("**/data/answers.json", (route) => route.fulfill({
+      json: ["tisch", "fisch", "stuhl", "tiger"],
+    }));
+    await page.addInitScript(() => {
+      const get = crypto.getRandomValues.bind(crypto);
+      crypto.getRandomValues = (view) => {
+        if (!(view instanceof Uint32Array)) return get(view);
+        view[0] = 0;
+        return view;
+      };
+    });
+    await page.goto("/");
+    await expect(page.locator(".daily-card").first()).toBeEnabled();
+    const footer = page.locator(".footer");
+    await expect(footer).toHaveCSS("justify-content", "center");
+    await expect(footer).toHaveCSS("text-align", "center");
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    const nav = await page.locator(".topnav").boundingBox();
+    for (const link of await footer.getByRole("link").all()) {
+      const box = await link.boundingBox();
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.y + box.height).toBeLessThan(nav.y);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
+
+    await page.locator(".mode-card").filter({ hasText: "Wordle" }).tap();
+    await expect(page.getByText("Versuch 1 von 6")).toBeVisible();
+    for (const letter of "tisch") await page.locator(`[data-key="${letter}"]`).tap();
+    await page.locator('[data-key="Enter"]').tap();
+    await expect(page.getByRole("heading", { name: "Geschafft!" })).toBeVisible();
+    await page.getByRole("button", { name: "Merken", exact: true }).tap();
+    await page.locator('.topnav a[href="#vocab"]').tap();
+    await expect(page.locator(".vocab-entry summary")).toHaveText("Tisch");
+    await page.locator('.topnav a[href="#stats"]').tap();
+    await page.locator(".history-entry summary").tap();
+    await expect(page.locator(".replay-answer")).toHaveText("TISCH");
+    await expect(page.locator(".replay-grid .tile.correct")).toHaveCount(5);
+  } finally {
+    await context.close();
+  }
+});
+
 test("word cards show grammar, play the recording, and remember the word after reload", async ({ page }) => {
   const audio = "https://upload.wikimedia.org/wikipedia/commons/e/e9/De-Tisch.ogg";
   await seedFinishedWordle(page, "tisch");
