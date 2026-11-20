@@ -782,24 +782,45 @@
     return holder;
   }
 
+  function vocabularyEntry(word, className, open = false) {
+    const entry = el("details", { class: className, open: open || null }, [
+      el("summary", { text: L.displayLetter(word[0]) + word.slice(1) }),
+    ]);
+    entry.addEventListener("toggle", () => {
+      if (entry.open && entry.childElementCount === 1) entry.appendChild(buildExplanation(word));
+    });
+    if (open) entry.appendChild(buildExplanation(word));
+    return entry;
+  }
+
   function renderVocabulary() {
     document.body.classList.remove("is-play");
+    const saved = data.savedWords;
     const view = el("div", { class: "view view-vocabulary" }, [
       el("header", { class: "page-heading" }, [el("h1", { tabindex: -1, text: "Wortschatz" }),
-        el("p", { class: "muted", text: `${data.savedWords.length} ${data.savedWords.length === 1 ? "gemerktes Wort" : "gemerkte Wörter"}` })]),
+        el("p", { class: "muted", text: `${saved.length} ${saved.length === 1 ? "gemerktes Wort" : "gemerkte Wörter"}` })]),
     ]);
-    if (!data.savedWords.length) {
-      view.appendChild(el("p", { class: "card muted", text: "Merke Wörter nach einer Runde oder im Verlauf." }));
-    }
-    for (const word of data.savedWords) {
-      const entry = el("details", { class: "vocab-entry" }, [
-        el("summary", { text: L.displayLetter(word[0]) + word.slice(1) }),
-      ]);
-      entry.addEventListener("toggle", () => {
-        if (entry.open && entry.childElementCount === 1) entry.appendChild(buildExplanation(word));
-      });
-      view.appendChild(entry);
-    }
+    const hidden = new Set(saved);
+    data.games.filter((game) => game.status === "playing")
+      .forEach((game) => game.answers.forEach((word) => hidden.add(word)));
+    const examples = ["katze", "tisch", "blume", "wolke", "fisch", "vogel", "stern", "boden", "apfel", "sturm"]
+      .filter((word) => !hidden.has(word)).slice(0, 3);
+    const firstOpen = !saved.length && window.matchMedia("(min-width: 861px)").matches;
+    view.appendChild(el("div", { class: "section-columns vocabulary-layout" }, [
+      el("section", { class: "card saved-panel", "aria-labelledby": "saved-heading" }, [
+        el("h2", { id: "saved-heading", text: "Gemerkt" }),
+        saved.length
+          ? el("div", { class: "vocabulary-entries" }, saved.map((word) => vocabularyEntry(word, "vocab-entry")))
+          : el("div", { class: "saved-empty" }, [
+            el("p", { class: "muted", text: "Öffne eine Wortkarte und tippe auf „Merken“, um sie hier zu speichern." }),
+            el("a", { href: "#menu", class: "btn", text: "Spielen" }),
+          ]),
+      ]),
+      examples.length ? el("section", { class: "card discover-panel", "aria-labelledby": "discover-heading" }, [
+        el("h2", { id: "discover-heading", text: "Wörter entdecken" }),
+        el("div", { class: "vocabulary-entries" }, examples.map((word, i) => vocabularyEntry(word, "discovery-entry", firstOpen && i === 0))),
+      ]) : null,
+    ]));
     setView(view);
   }
 
@@ -902,14 +923,14 @@
       return el("div", { class: "spark-col" }, [bar, el("span", { class: "spark-lbl", text: modeLabel(g.mode).slice(0, 2) })]);
     }));
 
-    return el("div", { class: "chart-grid", style: "margin-top:14px" }, [
-      el("div", { class: "card chart-card" }, [
+    return el("div", { class: "chart-grid" }, [
+      wins.length ? el("div", { class: "card chart-card" }, [
         el("h2", { text: "Wordle: Siege nach Versuchen" }),
-        counts.some((c) => c) ? dist : el("p", { class: "muted", text: "Noch keine Wordle-Siege." }),
-      ]),
+        dist,
+      ]) : null,
       el("div", { class: "card chart-card" }, [
         el("h2", { text: "Letzte Spiele" }),
-        last.length ? spark : el("p", { class: "muted", text: "Noch keine beendeten Spiele." }),
+        spark,
         el("div", { class: "legend" }, [
         el("span", null, [el("i", { class: "wordle" }), "Wordle"]),
         el("span", null, [el("i", { class: "quordle" }), "Quordle"]),
@@ -925,7 +946,7 @@
     const won = finished.filter((g) => g.status === "won");
     const wordleDone = finished.filter((g) => g.mode === "wordle");
     const quordleDone = finished.filter((g) => g.mode === "quordle");
-    const winRate = finished.length ? Math.round((won.length / finished.length) * 100) : 0;
+    const winRate = finished.length ? Math.round((won.length / finished.length) * 100) + " %" : "–";
 
     let streak = 0, best = 0;
     finished.forEach((g) => {
@@ -936,30 +957,29 @@
 
     const wrap = el("div", { class: "view" });
     wrap.appendChild(el("header", { class: "page-heading" }, [el("h1", { text: "Verlauf & Statistik" })]));
-    wrap.appendChild(el("div", { class: "stat-grid" }, [
-      statBox(finished.length, "Spiele beendet"),
-      statBox(winRate + " %", "Siegquote"),
-      statBox(best, "Beste Siegesserie"),
-    ]));
+    const history = el("section", { class: "card history-panel", "aria-labelledby": "games-heading" }, [
+      el("h2", { id: "games-heading", text: "Alle Spiele" }),
+      data.games.length
+        ? el("div", { class: "history-list" }, data.games.slice().reverse().map(historyEntry))
+        : el("p", { class: "muted", text: "Deine Partien erscheinen hier, sobald du spielst." }),
+    ]);
 
-    wrap.appendChild(el("h2", { class: "history-heading", text: "Alle Spiele" }));
-    if (!data.games.length) {
-      wrap.appendChild(el("p", { class: "muted", text: "Noch keine Spiele. Starte im Menü eine Runde!" }));
-    } else {
-      wrap.appendChild(el("div", { class: "history-list" }, data.games.slice().reverse().map(historyEntry)));
-    }
-
-    wrap.appendChild(el("details", { class: "history-metrics" }, [
-      el("summary", { text: "Weitere Statistiken" }),
+    const progress = el("section", { class: "card history-dashboard", "aria-labelledby": "ledger-heading" }, [
+      el("h2", { id: "ledger-heading", text: "Spielbilanz" }),
       el("div", { class: "stat-grid" }, [
+        statBox(finished.length, "Spiele beendet"),
         statBox(won.length, "Siege"),
-        statBox(wordleDone.length, "Wordle beendet"),
-        statBox(quordleDone.length, "Quordle beendet"),
-        statBox(avg, "Ø Versuche (Wordle-Sieg)"),
+        statBox(winRate, "Siegquote"),
+        statBox(best, "Beste Siegesserie"),
       ]),
-      statsCharts(finished),
-    ]));
-    wrap.appendChild(el("div", { class: "btn-row" }, [
+      el("dl", { class: "history-mode-stats" }, [
+        el("dt", { text: "Wordle beendet" }), el("dd", { text: wordleDone.length }),
+        el("dt", { text: "Quordle beendet" }), el("dd", { text: quordleDone.length }),
+        el("dt", { text: "Ø Versuche bei Wordle-Siegen" }), el("dd", { text: avg }),
+      ]),
+      finished.length ? statsCharts(finished) : null,
+    ]);
+    history.appendChild(el("div", { class: "btn-row" }, [
       el("a", { class: "btn", href: "#menu", text: "Menü" }),
       el("button", {
         class: "btn danger",
@@ -977,6 +997,7 @@
         },
       }),
     ]));
+    wrap.appendChild(el("div", { class: "section-columns history-layout" }, [history, progress]));
     setView(wrap);
   }
 
