@@ -120,6 +120,7 @@ test("Quordle keys show four independent results and mobile shows the selected b
   await page.goto("/");
   await play(page, "quordle");
   await expect(page.locator(".board:visible")).toHaveCount(4);
+  await expect(page.locator(".play-pick")).toBeHidden();
   const keyboard = await page.locator("#keyboard").boundingBox();
   for (const board of await page.locator(".board").all()) {
     const box = await board.boundingBox();
@@ -133,6 +134,7 @@ test("Quordle keys show four independent results and mobile shows the selected b
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator(".board:visible")).toHaveCount(1);
+  await expect(page.locator(".play-pick")).toBeVisible();
   await page.getByRole("button", { name: "Alle vier Wörter anzeigen" }).click();
   await expect(page.locator(".board:visible")).toHaveCount(4);
   await expect(page.locator(".board-hint i[class]").first()).toBeVisible();
@@ -143,6 +145,9 @@ test("Quordle keys show four independent results and mobile shows the selected b
   await guess(page, "lerne");
   await expect(page.getByText("Versuch 3 von 9")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await expect(page.locator(".play-pick")).toBeHidden();
+  await expect(page.locator(".board:visible")).toHaveCount(4);
 });
 
 test("free play works when the daily word list is unavailable", async ({ page }) => {
@@ -220,6 +225,7 @@ test("a legacy completed Quordle can be replayed by attempt and by board", async
   await page.goto("/#stats");
   await page.locator(".history-entry summary").click();
   await expect(page.locator(".replay-answer")).toHaveText("APFEL");
+  await expect(page.locator(".replay-pick")).toBeVisible();
   await expect(page.locator(".replay-grid .row")).toHaveCount(2);
   await page.getByRole("button", { name: "‹ Zurück" }).click();
   await expect(page.locator(".replay-grid .row")).toHaveCount(1);

@@ -462,7 +462,7 @@
   }
 
   function scrollToBoard(game) {
-    if (mobileBoards.matches && showOverview) return;
+    if (game.mode === "quordle" && (!mobileBoards.matches || showOverview)) return;
     requestAnimationFrame(() => {
       if (routedGame()?.id !== game.id) return;
       const board = document.querySelector(`#boards [data-board="${selectedBoard}"]`);
