@@ -599,17 +599,33 @@
   }
 
   /* Картинка из Википедии: миниатюра, по клику — увеличенный просмотр с подписью */
+  function wikipediaImage(img, enlarged, onUnavailable) {
+    const thumb = img.thumb;
+    const upload = thumb.replace(/^https:\/\/thumb\.wikimedia\.org\/wikipedia\//, "https://upload.wikimedia.org/wikipedia/");
+    const candidates = [...new Set(enlarged ? [img.full, thumb, upload] : [thumb, upload, img.full])];
+    const node = el("img", { alt: img.title, loading: enlarged ? "eager" : "lazy" });
+    let index = 0;
+    node.addEventListener("error", () => {
+      index++;
+      if (index < candidates.length) node.src = candidates[index];
+      else onUnavailable();
+    });
+    node.src = candidates[0];
+    return node;
+  }
+
   function imageBlock(img) {
-    return el("figure", { class: "ex-fig" }, [
-      el("button", { class: "ex-img", type: "button", "aria-label": "Bild vergrößern", onclick: () => openLightbox(img) }, [
-        el("img", { src: img.thumb, alt: img.title, loading: "lazy" }),
-      ]),
+    const figure = el("figure", { class: "ex-fig" }, [
       el("figcaption", { class: "ex-cap" }, [
         el("div", { class: "ex-cap-title", text: img.title }),
         img.description ? el("div", { class: "muted small", text: img.description }) : null,
         el("a", { href: img.page, target: "_blank", rel: "noopener", text: "Wikipedia ↗" }),
       ]),
     ]);
+    const thumbnail = wikipediaImage(img, false, () => figure.remove());
+    figure.prepend(el("button", { class: "ex-img", type: "button", "aria-label": "Bild vergrößern",
+      onclick: () => openLightbox(img) }, [thumbnail]));
+    return figure;
   }
 
   function openLightbox(img) {
@@ -620,6 +636,7 @@
       if (box) box.remove();
       box = null;
     }
+    const image = wikipediaImage(img, true, () => image.replaceWith(el("p", { text: "Das Bild konnte nicht geladen werden." })));
     box = el("div", {
       class: "lightbox",
       role: "dialog",
@@ -629,7 +646,7 @@
     }, [
       el("div", { class: "lb-inner" }, [
         el("button", { class: "lb-close", type: "button", "aria-label": "Schließen", text: "✕", onclick: close }),
-        el("img", { src: img.full, alt: img.title }),
+        image,
         el("div", { class: "lb-caption" }, [
           el("strong", { text: img.title }),
           img.description ? el("span", { text: " – " + img.description }) : null,

@@ -154,6 +154,48 @@ test("definitions appear independently of images and are available in finished h
   unblock();
 });
 
+test("a previously missing image loads from Wikimedia even when the thumbnail host fails", async ({ context, page }) => {
+  await installExternalFixtures(context);
+  const thumbPath = "/wikipedia/commons/thumb/5/54/sailboat.jpg/330px-sailboat.jpg";
+  const fullPath = "/wikipedia/commons/5/54/sailboat.jpg";
+  const thumb = "https://thumb.wikimedia.org" + thumbPath;
+  const full = "https://upload.wikimedia.org" + fullPath;
+  const article = "https://de.wikipedia.org/wiki/Yacht";
+  await page.route("https://de.wikipedia.org/w/api.php?**", (route) => {
+    const title = new URL(route.request().url()).searchParams.get("titles");
+    expect(title).toBe("Jacht");
+    return route.fulfill({ json: { query: { pages: [{
+      title: "Yacht", fullurl: article, description: "Segelboot",
+      thumbnail: { source: thumb }, original: { source: full },
+    }] } } });
+  });
+  await page.route(thumb, (route) => route.abort("failed"));
+  const pixel = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=", "base64");
+  await page.route("https://upload.wikimedia.org/**", (route) => route.fulfill({
+    contentType: "image/png", body: pixel,
+  }));
+  await page.addInitScript((key) => {
+    localStorage.setItem("wordle-deutsch-images-v2", '{"jacht":null}');
+    localStorage.setItem(key, JSON.stringify({
+      version: 1, used: ["jacht"], games: [{
+        id: "old-jacht", mode: "wordle", status: "won", startedAt: new Date().toISOString(),
+        maxAttempts: 6, answers: ["jacht"], solvedAt: [1], guesses: [], progress: [],
+      }],
+    }));
+  }, storageKey);
+  await page.goto("/#play");
+  const thumbnail = page.getByRole("img", { name: "Jacht" });
+  await thumbnail.scrollIntoViewIfNeeded();
+  await expect(thumbnail).toHaveAttribute("src", "https://upload.wikimedia.org" + thumbPath);
+  await expect(thumbnail).toHaveJSProperty("naturalWidth", 1);
+  await expect(page.locator(".ex-fig a")).toHaveAttribute("href", article);
+
+  await page.getByRole("button", { name: "Bild vergrößern" }).click();
+  const enlarged = page.getByRole("dialog").getByRole("img");
+  await expect(enlarged).toHaveAttribute("src", full);
+  await expect(enlarged).toHaveJSProperty("naturalWidth", 1);
+});
+
 test("a storage write failure still lets the player play and navigate", async ({ page }) => {
   await page.addInitScript((key) => {
     const setItem = Storage.prototype.setItem;

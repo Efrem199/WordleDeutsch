@@ -147,7 +147,9 @@
 
   /* ---------- Картинки из Википедии ---------- */
 
-  const IMG_CACHE_KEY = "wordle-deutsch-images-v2";
+  const WIKIPEDIA = "https://de.wikipedia.org";
+  const IMG_CACHE_KEY = "wordle-deutsch-images-v3";
+  const IMG_CACHE_TTL = 7 * 24 * 60 * 60 * 1000;
 
   function loadImageCache() {
     try {
@@ -162,12 +164,38 @@
     } catch (e) { /* не критично */ }
   }
 
-  async function fetchSummary(title, signal) {
-    const url = "https://de.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(title);
-    const res = await fetch(url, { headers: { accept: "application/json" }, signal });
-    if (res.status === 404) return null;
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    return res.json();
+  async function fetchImageMetadata(url) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      if (res.status === 404) return null;
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return await res.json();
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  async function queryPageImage(title) {
+    const params = new URLSearchParams({
+      action: "query", prop: "pageimages|pageprops|description|info", inprop: "url",
+      piprop: "thumbnail|original", pithumbsize: "320", redirects: "1",
+      titles: title, format: "json", formatversion: "2", origin: "*",
+    });
+    const data = await fetchImageMetadata(WIKIPEDIA + "/w/api.php?" + params);
+    const page = data?.query?.pages?.[0];
+    if (!page) throw new Error("Wikipedia did not return page image metadata.");
+    if (page.missing || Object.hasOwn(page.pageprops || {}, "disambiguation")) return null;
+    return { thumb: page.thumbnail?.source, full: page.original?.source,
+      page: page.fullurl, description: page.description };
+  }
+
+  async function querySummaryImage(title) {
+    const data = await fetchImageMetadata(WIKIPEDIA + "/api/rest_v1/page/summary/" + encodeURIComponent(title));
+    if (!data || data.type === "disambiguation") return null;
+    return { thumb: data.thumbnail?.source, full: data.originalimage?.source,
+      page: data.content_urls?.desktop?.page, description: data.description };
   }
 
   /**
@@ -176,31 +204,30 @@
    * Пропускает begriffsklärung (несколько значений), чтобы не показать случайную картинку.
    */
   async function getWikiImage(word) {
-    const cache = loadImageCache();
-    if (Object.prototype.hasOwnProperty.call(cache, word)) return cache[word];
+    const cached = loadImageCache()[word];
+    if (cached?.image && Date.now() - cached.savedAt < IMG_CACHE_TTL) return cached.image;
 
-    const cap = capitalized(word);
-    const signal = AbortSignal.timeout(REQUEST_TIMEOUT);
-    for (const title of [cap, word]) {
-      let s;
+    const title = capitalized(word);
+    let metadata;
+    try {
+      metadata = await queryPageImage(title);
+    } catch {
       try {
-        s = await fetchSummary(title, signal);
-      } catch (e) {
-        return null; // сеть недоступна — без кэширования
+        metadata = await querySummaryImage(title);
+      } catch {
+        return null;
       }
-      if (!s || s.type === "disambiguation" || !s.thumbnail || !s.thumbnail.source) continue;
-      const result = {
-        title: cap, // подпись — то слово, что выпало в игре, а не название статьи после редиректа
-        description: s.description || "",
-        thumb: s.thumbnail.source,
-        full: (s.originalimage && s.originalimage.source) || s.thumbnail.source,
-        page: (s.content_urls && s.content_urls.desktop && s.content_urls.desktop.page) || "https://de.wikipedia.org/wiki/" + encodeURIComponent(cap),
-      };
-      saveImageCache({ ...loadImageCache(), [word]: result });
-      return result;
     }
-    saveImageCache({ ...loadImageCache(), [word]: null });
-    return null;
+    if (!metadata?.thumb && !metadata?.full) return null;
+    const image = {
+      title,
+      description: metadata.description || "",
+      thumb: metadata.thumb || metadata.full,
+      full: metadata.full || metadata.thumb,
+      page: metadata.page || WIKIPEDIA + "/wiki/" + encodeURIComponent(title),
+    };
+    saveImageCache({ ...loadImageCache(), [word]: { savedAt: Date.now(), image } });
+    return image;
   }
 
   const api = { getExplanation, parseWiktionary, getWikiImage };

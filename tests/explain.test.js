@@ -1,12 +1,14 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { parseHTML } = require("linkedom");
-const { getExplanation, parseWiktionary } = require("../js/explain.js");
+const { getExplanation, getWikiImage, parseWiktionary } = require("../js/explain.js");
 
 globalThis.document = parseHTML("<html></html>").document;
+const storage = new Map();
 Object.defineProperty(globalThis, "localStorage", {
-  value: { getItem: () => null, setItem: () => {} },
+  value: { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) },
 });
+test.beforeEach(() => storage.clear());
 
 const noun = '<h3 id="Substantiv"><a href="/wiki/Hilfe:Wortart#Substantiv">Substantiv</a>, <em>m</em></h3>';
 const german = '<div class="mw-heading mw-heading2"><h2>Wort (<a href="/wiki/Wiktionary:Deutsch">Deutsch</a>)</h2></div>';
@@ -80,4 +82,31 @@ test("zirkuläre Lemmaverweise enden ohne Wiederholungen", async (t) => {
   });
   assert.equal((await getExplanation("jacht")).ok, false);
   assert.equal(request.mock.callCount(), 2);
+});
+
+test("ein API-Ausfall wird nicht als fehlendes Bild gespeichert", async (t) => {
+  const image = "https://upload.wikimedia.org/wikipedia/commons/f/f0/example.jpg";
+  let summaryAvailable = false;
+  const request = t.mock.method(globalThis, "fetch", async (url) => {
+    if (new URL(url).pathname === "/w/api.php" || !summaryAvailable) {
+      return { ok: false, status: 429 };
+    }
+    return { ok: true, json: async () => ({ thumbnail: { source: image } }) };
+  });
+  assert.equal(await getWikiImage("katze"), null);
+  summaryAvailable = true;
+  assert.equal((await getWikiImage("katze")).thumb, image);
+  assert.equal((await getWikiImage("katze")).thumb, image);
+  assert.equal(request.mock.callCount(), 4);
+});
+
+test("Bilder von Begriffsklärungen erscheinen nicht", async (t) => {
+  const request = t.mock.method(globalThis, "fetch", async () => ({
+    ok: true,
+    json: async () => ({ query: { pages: [{
+      pageprops: { disambiguation: "" }, thumbnail: { source: "https://thumb.wikimedia.org/example.jpg" },
+    }] } }),
+  }));
+  assert.equal(await getWikiImage("fisch"), null);
+  assert.equal(request.mock.callCount(), 1);
 });
