@@ -148,7 +148,7 @@
 
   /* ---------- Картинки из Википедии ---------- */
 
-  const IMG_CACHE_KEY = "wordle-deutsch-images-v1";
+  const IMG_CACHE_KEY = "wordle-deutsch-images-v2";
 
   function loadImageCache() {
     try {
@@ -190,7 +190,7 @@
       }
       if (!s || s.type === "disambiguation" || !s.thumbnail || !s.thumbnail.source) continue;
       const result = {
-        title: s.title || cap,
+        title: cap, // подпись — то слово, что выпало в игре, а не название статьи после редиректа
         description: s.description || "",
         thumb: s.thumbnail.source,
         full: (s.originalimage && s.originalimage.source) || s.thumbnail.source,
