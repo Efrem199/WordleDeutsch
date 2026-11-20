@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const L = require("../public/js/logic.js");
+const L = require("../js/logic.js");
 const { RESULT: R } = L;
 
 test("полностью правильное слово", () => {

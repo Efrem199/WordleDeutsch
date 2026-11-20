@@ -19,15 +19,13 @@
 
 ## Онлайн-версия
 
-Сайт публикуется через GitHub Pages (workflow `.github/workflows/pages.yml` при каждом пуше в `main`):
+Сайт публикуется через GitHub Pages напрямую из ветки `main` (корень репозитория):
 https://efrem199.github.io/WordleDeutsch/
-
-Для публикации в Settings → Pages источник должен быть «GitHub Actions» (workflow включает Pages сам, если это разрешено).
 
 ## Запуск
 
 ```bash
-npm start            # python3 -m http.server 8000 --bind 0.0.0.0 --directory public
+npm start            # python3 -m http.server 8000 --bind 0.0.0.0 (из корня репозитория)
 # открыть http://localhost:8000
 ```
 
@@ -40,14 +38,13 @@ npm test
 ## Структура
 
 ```
-public/
-  index.html         разметка
-  css/style.css      стили
-  js/logic.js        правила игры (оценка попытки, выбор слов) — без DOM, покрыто тестами
-  js/explain.js      пояснения из Wiktionary (MediaWiki API, origin=*)
-  js/app.js          интерфейс, сохранение, маршруты (#menu, #play, #stats, #rules)
-  data/answers.json  загаданные слова (950)
-  data/guesses.json  все допустимые слова (3421)
+index.html           разметка (точка входа для GitHub Pages)
+css/style.css        стили
+js/logic.js          правила игры (оценка попытки, выбор слов) — без DOM, покрыто тестами
+js/explain.js        пояснения из Wiktionary (MediaWiki API, origin=*)
+js/app.js            интерфейс, сохранение, маршруты (#menu, #play, #stats, #rules)
+data/answers.json    загаданные слова (950)
+data/guesses.json    все допустимые слова (3421)
 tools/
   build_wordlists.py   генерация списков из словаря Hunspell и частотного списка
   answer_blacklist.txt чёрный список для загаданных слов (имена, география, бренды, мат и т. п.)
@@ -65,7 +62,7 @@ tests/               node:test
 
 ```bash
 # файлы из dictionary-de (index.dic, index.aff) и de_full.txt из FrequencyWords
-python3 tools/build_wordlists.py <index.dic> <index.aff> <de_full.txt> public/data
+python3 tools/build_wordlists.py <index.dic> <index.aff> <de_full.txt> data
 ```
 
 ## Ограничения
