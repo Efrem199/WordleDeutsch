@@ -114,17 +114,36 @@ test("the daily puzzle matches across profiles and resumes alongside free play",
   }
 });
 
+test("on a wide screen Wordle uses larger tiles and keeps the keyboard under the board", async ({ page }) => {
+  await page.setViewportSize({ width: 1900, height: 945 });
+  await page.goto("/");
+  await play(page, "wordle");
+  const tile = await page.locator(".board .tile").first().boundingBox();
+  expect(tile.width).toBeGreaterThanOrEqual(70);
+  const board = await page.locator(".board").boundingBox();
+  const keyboard = await page.locator("#keyboard").boundingBox();
+  const gap = keyboard.y - (board.y + board.height);
+  expect(gap).toBeGreaterThanOrEqual(0);
+  expect(gap).toBeLessThan(30);
+  expect(keyboard.y + keyboard.height).toBeLessThanOrEqual(945);
+});
+
 test("Quordle keys show four independent results and mobile shows the selected board", async ({ page }) => {
-  await page.setViewportSize({ width: 1300, height: 900 });
+  await page.setViewportSize({ width: 1280, height: 720 });
   await page.route("**/data/answers.json", (route) => route.fulfill({ json: quorum }));
   await page.goto("/");
   await play(page, "quordle");
   await expect(page.locator(".board:visible")).toHaveCount(4);
   await expect(page.locator(".play-pick")).toBeHidden();
   const keyboard = await page.locator("#keyboard").boundingBox();
+  const playArea = await page.locator(".play-scroll").boundingBox();
+  expect(keyboard.y + keyboard.height).toBeLessThanOrEqual(720);
   for (const board of await page.locator(".board").all()) {
     const box = await board.boundingBox();
-    expect(box.y + box.height).toBeLessThan(keyboard.y);
+    const bottom = box.y + box.height;
+    expect(bottom).toBeLessThanOrEqual(playArea.y + playArea.height + 1);
+    expect(keyboard.y - bottom).toBeGreaterThanOrEqual(0);
+    expect(keyboard.y - bottom).toBeLessThan(30);
   }
   await guess(page, "tisch");
   await expect(page.getByText("Versuch 2 von 9")).toBeVisible();
@@ -145,6 +164,10 @@ test("Quordle keys show four independent results and mobile shows the selected b
   await guess(page, "lerne");
   await expect(page.getByText("Versuch 3 von 9")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.setViewportSize({ width: 320, height: 568 });
+  const shortViewport = await page.locator(".play-scroll").boundingBox();
+  const selected = await page.locator('[data-board="2"]').boundingBox();
+  expect(selected.y + selected.height).toBeLessThanOrEqual(shortViewport.y + shortViewport.height + 1);
   await page.setViewportSize({ width: 1100, height: 800 });
   await expect(page.locator(".play-pick")).toBeHidden();
   await expect(page.locator(".board:visible")).toHaveCount(4);
@@ -311,6 +334,7 @@ test("word cards show grammar, play the recording, and remember the word after r
 });
 
 test("a legacy completed Quordle can be replayed by attempt and by board", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 900 });
   const answers = ["apfel", "tisch", "stuhl", "tiger"];
   const solvedAt = [2, 1, null, null];
   const guesses = ["tisch", "apfel", "lerne"].map((word, index) => ({
@@ -325,6 +349,10 @@ test("a legacy completed Quordle can be replayed by attempt and by board", async
     }] }));
   }, { key: storageKey, answers, solvedAt, guesses });
   await page.goto("/#stats");
+  const history = await page.locator(".history-panel").boundingBox();
+  const stats = await page.locator(".history-dashboard").boundingBox();
+  expect(history.y).toBeCloseTo(stats.y);
+  expect(history.x + history.width).toBeLessThan(stats.x);
   await page.locator(".history-entry summary").click();
   await expect(page.locator(".replay-answer")).toHaveText("APFEL");
   await expect(page.locator(".replay-pick")).toBeVisible();
@@ -335,6 +363,30 @@ test("a legacy completed Quordle can be replayed by attempt and by board", async
   await expect(page.locator(".replay-answer")).toHaveText("STUHL");
   await expect(page.locator(".replay-grid .row")).toHaveCount(3);
   await expect(page.locator(".replay-grid .tile.present").first()).toBeVisible();
+});
+
+test("vocabulary examples can be saved and hide a solution from an active game", async ({ context, page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await installExternalFixtures(context);
+  await page.addInitScript((key) => {
+    localStorage.setItem(key, JSON.stringify({ version: 1, used: ["katze"], games: [{
+      id: "active", mode: "wordle", status: "playing", startedAt: new Date().toISOString(),
+      maxAttempts: 6, answers: ["katze"], solvedAt: [null], guesses: [], progress: [],
+    }] }));
+  }, storageKey);
+  await page.goto("/#vocab");
+  const suggestions = page.locator(".discovery-entry summary");
+  await expect(suggestions).toHaveText(["Tisch", "Blume", "Wolke"]);
+  await expect(page.locator(".discovery-entry[open]")).toHaveCount(0);
+  const savedPanel = await page.locator(".saved-panel").boundingBox();
+  const discoverPanel = await page.locator(".discover-panel").boundingBox();
+  expect(savedPanel.y + savedPanel.height).toBeLessThan(discoverPanel.y);
+
+  await suggestions.filter({ hasText: "Tisch" }).click();
+  await expect(page.getByText("Möbelstück")).toBeVisible();
+  await page.getByRole("button", { name: "Merken", exact: true }).click();
+  await expect(page.locator(".vocab-entry summary")).toHaveText("Tisch");
+  await expect(suggestions).toHaveText(["Blume", "Wolke", "Fisch"]);
 });
 
 test("invalid word lists leave the game unavailable but keep rules and history accessible", async ({ page }) => {
