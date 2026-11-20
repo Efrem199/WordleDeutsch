@@ -416,7 +416,7 @@
     const kb = el("div", { class: "keyboard", id: "keyboard" });
     KEYBOARD_ROWS.forEach((keys, idx) => {
       const row = el("div", { class: "kb-row" });
-      if (idx === 2) row.appendChild(el("button", { class: "key wide", text: "Enter", "data-key": "Enter", onclick: () => handleKey("Enter") }));
+      if (idx === 2) row.appendChild(el("button", { class: "key wide", text: "↵", "data-key": "Enter", "aria-label": "Eingeben", onclick: () => handleKey("Enter") }));
       keys.forEach((k) => row.appendChild(el("button", { class: "key", text: k === "ß" ? "ẞ" : k, "data-key": k, onclick: () => handleKey(k) })));
       if (idx === 2) row.appendChild(el("button", { class: "key wide", text: "⌫", "data-key": "Backspace", "aria-label": "Löschen", onclick: () => handleKey("Backspace") }));
       kb.appendChild(row);

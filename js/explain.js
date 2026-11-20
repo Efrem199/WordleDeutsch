@@ -1,30 +1,37 @@
 /*
- * Пояснения слов из немецкого Wiktionary (de.wiktionary.org), через MediaWiki API с CORS (origin=*).
- * Результаты кэшируются в localStorage. Лицензия текстов: CC BY-SA 4.0.
+ * Пояснения существительных из немецкого Wiktionary (de.wiktionary.org) через MediaWiki API (CORS, origin=*).
+ * Берётся только немецкая секция «Substantiv» со словом с заглавной буквы: строчное «wurst» — это другое слово
+ * (прилагательное «egal»), поэтому оно не запрашивается. Результаты кэшируются в localStorage.
+ * Лицензия текстов: CC BY-SA 4.0.
  */
 (function (root) {
-  const CACHE_KEY = "wordle-deutsch-definitions-v1";
+  const CACHE_KEY = "wordle-deutsch-definitions-v2";
   const API = "https://de.wiktionary.org/w/api.php";
+  const MAX_DEFS = 3;
+  const MAX_LEN = 280;
 
+  /** Очистка строки вики-текста до обычного текста. */
   function cleanWiki(line) {
     let t = line;
-    t = t.replace(/<ref[^>]*>.*?<\/ref>/gs, "");
+    t = t.replace(/<!--[\s\S]*?-->/g, "");
+    t = t.replace(/<ref[^>]*>[\s\S]*?<\/ref>/g, "");
     t = t.replace(/<ref[^>]*\/>/g, "");
-    t = t.replace(/\{\{K\|([^}|]*)[^}]*\}\}/g, "($1) ");          // Kontext-Angabe
-    for (let i = 0; i < 10 && /\{\{[^{}]*\}\}/.test(t); i++) {    // übrige Vorlagen entfernen
-      t = t.replace(/\{\{[^{}]*\}\}/g, "");
-    }
-    for (let i = 0; i < 5 && /\[\[[^\[\]]*\]\]/.test(t); i++) {   // Links -> Text
-      t = t.replace(/\[\[(?:[^\[\]|]*\|)?([^\[\]]*)\]\]/g, "$1");
-    }
-    t = t.replace(/'{2,}/g, "");                                  // kursiv/fett
-    t = t.replace(/\[\d+(?:[,–-]\s*\d+)*\]/g, "");              // [1], [1, 2] Verweise
-    t = t.replace(/^:\s*/, "");
+    // {{K|Gastronomie}}, {{K|ugs.|übertragen}} -> (Gastronomie) / (ugs., übertragen): только безымянные параметры
+    t = t.replace(/\{\{K\|([^{}]*)\}\}/g, (m, body) => {
+      const params = body.split("|").map((x) => x.trim()).filter((x) => x && x.indexOf("=") < 0);
+      return params.length ? "(" + params.join(", ") + ") " : "";
+    });
+    // Прочие шаблоны (Ü, Lit, Hilfe …) убираем; вложенные — несколькими проходами
+    for (let i = 0; i < 10 && /\{\{[^{}]*\}\}/.test(t); i++) t = t.replace(/\{\{[^{}]*\}\}/g, "");
+    // Ссылки: [[a|b]] -> b, [[a]] -> a
+    for (let i = 0; i < 5 && /\[\[[^\[\]]*\]\]/.test(t); i++) t = t.replace(/\[\[(?:[^\[\]|]*\|)?([^\[\]]*)\]\]/g, "$1");
+    t = t.replace(/'{2,}/g, "");                       // курсив и полужирный
+    t = t.replace(/\[\d+(?:[,–-]\s*\d+)*\]/g, "");   // сноски [1], [1, 2]
     t = t.replace(/\s+/g, " ").replace(/\s+([,.;:)])/g, "$1").replace(/\(\s+/g, "(").trim();
     return t;
   }
 
-  /** Немецкая секция вики-текста (или null, если её нет). */
+  /** Немецкая секция вики-текста или null, если её нет. */
   function germanSection(wikitext) {
     let text = wikitext;
     const start = text.search(/==\s*[^=\n]+\(\{\{Sprache\|Deutsch\}\}\)\s*==/);
@@ -37,41 +44,47 @@
     return /Sprache\|Deutsch/.test(text) ? text : null;
   }
 
-  /** Если статья — только отсылка на другое слово ({{Lemmaverweis|…}}), возвращает это слово. */
-  function findLemma(wikitext) {
-    const text = germanSection(wikitext);
-    if (!text) return "";
-    const m = text.match(/\{\{Lemmaverweis\|([^|}]+)/);
-    return m ? m[1].trim() : "";
+  /** Подсекция «Substantiv» внутри немецкой секции или null. Другие части речи не используются. */
+  function nounSection(german) {
+    const head = /^=+\s*\{\{Wortart\|Substantiv\|Deutsch\}\}.*$/m.exec(german);
+    if (!head) return null;
+    const after = head.index + head[0].length;
+    const next = /^=+\s*\{\{Wortart\|/m.exec(german.slice(after));
+    return german.slice(head.index, next ? after + next.index : german.length);
   }
 
-  /** Извлекает часть речи и первые значения из вики-текста немецкой секции. */
-  function parseWiktionary(wikitext) {
-    const text = germanSection(wikitext);
-    if (!text) return { wortart: "", defs: [] };
-
-    const wm = text.match(/\{\{Wortart\|([^|}]+)\|Deutsch/);
-    const wortart = wm ? wm[1] : "";
-
-    const idx = text.indexOf("{{Bedeutungen}}");
-    if (idx < 0) return { wortart, defs: [] };
-
+  /** Значения из блока {{Bedeutungen}}: только строки вида «:[1] …», вложенные «::[1.1]» пропускаются. */
+  function parseDefs(section) {
+    const lines = section.split("\n");
+    const start = lines.findIndex((l) => l.trim() === "{{Bedeutungen}}");
+    if (start < 0) return [];
     const defs = [];
-    const lines = text.slice(idx).split("\n").slice(1);
-    for (const line of lines) {
-      if (!line.trim()) {
-        if (defs.length) break;
-        continue;
-      }
-      if (!line.startsWith(":[")) {
-        if (defs.length) break;
-        continue;
-      }
-      const cleaned = cleanWiki(line);
-      if (cleaned) defs.push(cleaned.length > 280 ? cleaned.slice(0, 277) + "…" : cleaned);
-      if (defs.length >= 3) break;
+    for (const line of lines.slice(start + 1)) {
+      if (/^\{\{|^==/.test(line)) break; // начался следующий раздел
+      const m = /^:\[(\d+)\]\s*(.*)$/.exec(line);
+      if (!m) continue;
+      const cleaned = cleanWiki(m[2]);
+      if (cleaned) defs.push(cleaned.length > MAX_LEN ? cleaned.slice(0, MAX_LEN - 1) + "…" : cleaned);
+      if (defs.length >= MAX_DEFS) break;
     }
-    return { wortart, defs };
+    return defs;
+  }
+
+  /** Часть речи и значения существительного из вики-текста. */
+  function parseWiktionary(wikitext) {
+    const german = germanSection(wikitext);
+    if (!german) return { wortart: "", defs: [] };
+    const noun = nounSection(german);
+    if (!noun) return { wortart: "", defs: [] };
+    return { wortart: "Substantiv", defs: parseDefs(noun) };
+  }
+
+  /** Если статья — только отсылка ({{Lemmaverweis|…}}), возвращает основную форму. */
+  function findLemma(wikitext) {
+    const german = germanSection(wikitext);
+    if (!german) return "";
+    const m = german.match(/\{\{Lemmaverweis\|([^|}]+)/);
+    return m ? m[1].trim() : "";
   }
 
   function loadCache() {
@@ -107,48 +120,40 @@
   }
 
   /**
-   * Возвращает { word, wortart, defs: string[], url, ok }.
-   * Сначала пробует слово в нижнем регистре (глаголы/прилагательные), затем с заглавной буквы (существительные).
+   * Возвращает { word, wortart, defs, url, ok }.
+   * Слово в игре — существительное, поэтому ищем его с заглавной буквы. Если статья — отсылка
+   * (Jacht → Yacht), берём значения основной формы; слово в подписи остаётся прежним.
    */
   async function getExplanation(word) {
     const cache = loadCache();
     if (cache[word]) return cache[word];
 
     const result = { word, wortart: "", defs: [], url: pageUrl(word), ok: false };
-    const titles = [word, word.charAt(0).toUpperCase() + word.slice(1)];
-    const tried = [];
-    for (const title of titles) {
-      try {
-        const content = await fetchTitle(title);
-        tried.push(title);
-        let parsed = parseWiktionary(content);
-        // Отсылка на основную форму (Jacht -> Yacht): читаем её статью
-        const lemma = !parsed.defs.length && findLemma(content);
-        if (lemma && tried.indexOf(lemma) < 0) {
-          const lemmaParsed = parseWiktionary(await fetchTitle(lemma));
-          if (lemmaParsed.defs.length) parsed = lemmaParsed;
-        }
-        if (parsed.defs.length) {
-          result.wortart = parsed.wortart;
-          result.defs = parsed.defs;
-          result.ok = true;
-          break;
-        }
-      } catch (e) {
-        // Сеть недоступна — вернём результат без пояснения, без кэширования
-        return result;
+    const title = word.charAt(0).toUpperCase() + word.slice(1);
+    try {
+      const content = await fetchTitle(title);
+      let parsed = parseWiktionary(content);
+      const lemma = !parsed.defs.length && findLemma(content);
+      if (lemma && lemma !== title) {
+        const lemmaParsed = parseWiktionary(await fetchTitle(lemma));
+        if (lemmaParsed.defs.length) parsed = lemmaParsed;
       }
-    }
-    if (result.ok) {
-      cache[word] = result;
-      saveCache(cache);
+      if (parsed.defs.length) {
+        result.wortart = parsed.wortart;
+        result.defs = parsed.defs;
+        result.ok = true;
+        cache[word] = result;
+        saveCache(cache);
+      }
+    } catch (e) {
+      // Сеть недоступна — пояснения нет, в кэш не пишем
     }
     return result;
   }
 
   /* ---------- Картинки из Википедии ---------- */
 
-  const IMG_CACHE_KEY = "wordle-deutsch-images-v1";
+  const IMG_CACHE_KEY = "wordle-deutsch-images-v2";
 
   function loadImageCache() {
     try {
@@ -190,7 +195,7 @@
       }
       if (!s || s.type === "disambiguation" || !s.thumbnail || !s.thumbnail.source) continue;
       const result = {
-        title: s.title || cap,
+        title: cap, // подпись — то слово, что выпало в игре, а не название статьи после редиректа
         description: s.description || "",
         thumb: s.thumbnail.source,
         full: (s.originalimage && s.originalimage.source) || s.thumbnail.source,
@@ -205,7 +210,7 @@
     return null;
   }
 
-  const api = { getExplanation, parseWiktionary, cleanWiki, pageUrl, getWikiImage };
+  const api = { getExplanation, parseWiktionary, findLemma, cleanWiki, pageUrl, getWikiImage };
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.WordExplain = api;
 })(typeof self !== "undefined" ? self : this);

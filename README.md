@@ -43,8 +43,8 @@ css/style.css        стили
 js/logic.js          правила игры (оценка попытки, выбор слов) — без DOM, покрыто тестами
 js/explain.js        пояснения из Wiktionary (MediaWiki API, origin=*)
 js/app.js            интерфейс, сохранение, маршруты (#menu, #play, #stats, #rules)
-data/answers.json    загаданные слова (950)
-data/guesses.json    все допустимые слова (3421)
+data/answers.json    загаданные слова, только существительные (950)
+data/guesses.json    допустимые слова, только существительные (1841)
 tools/
   build_wordlists.py   генерация списков из словаря Hunspell и частотного списка
   answer_blacklist.txt чёрный список для загаданных слов (имена, география, бренды, мат и т. п.)
@@ -53,8 +53,9 @@ tests/               node:test
 
 ## Источники данных
 
-- **Словарь**: `dictionary-de` (npm, Hunspell de_DE / igerman98, лицензия GPLv2/GPLv3). Базовые слова
-  разворачиваются по аффиксным правилам во все словоформы. Допустимые слова = все 5-буквенные формы.
+- **Словарь**: `dictionary-de` (npm, Hunspell de_DE / igerman98, лицензия GPLv2/GPLv3). В немецком словаре
+  существительные пишутся с заглавной буквы, поэтому берутся только такие леммы: допустимые слова — 5-буквенные
+  существительные в именительном падеже (без словоформ вроде «Hunde», если их нет отдельной леммой).
 - **Частотность** (для выбора загаданных слов): FrequencyWords, hermitdave (MIT), основано на OpenSubtitles 2016 (de).
 - **Пояснения**: Wiktionary, de.wiktionary.org (CC BY-SA 4.0).
 - **Шрифт**: Inter (SIL Open Font License 1.1), файлы в `fonts/`, лицензия в `fonts/LICENSE-Inter.txt`.
@@ -63,13 +64,14 @@ tests/               node:test
 
 ```bash
 # файлы из dictionary-de (index.dic, index.aff) и de_full.txt из FrequencyWords
-python3 tools/build_wordlists.py <index.dic> <index.aff> <de_full.txt> data
+python3 tools/build_wordlists.py <index.dic> <de_full.txt> data
 ```
 
 ## Ограничения
 
-- Слова с ß не используются (на немецкой клавиатуре ß нет в QWERTZ-раскладке экрана).
-- Загаданных слов 950: самые частотные леммы из словаря, после фильтрации имён, брендов и т. п.
+- В списки входят существительные с ß (ß есть на экранной клавиатуре и в вводе с физической).
+- Загаданных слов 950: самые частотные существительные из словаря, после фильтрации имён, брендов и т. п.
   Список можно расширить, уменьшив чёрный список или увеличив `ANSWER_POOL_SIZE` в `tools/build_wordlists.py`.
-- Пояснения требуют интернета; без него показывается сообщение «Keine Bedeutung gefunden».
+- Пояснения берутся из секции «Substantiv» статьи Wiktionary и требуют интернета; без него показывается «Keine Bedeutung gefunden».
+  Если статья — отсылка (например, Jacht → Yacht), показывается значение основной формы.
 - Данные хранятся в браузере (localStorage): при очистке данных сайта история пропадёт.
