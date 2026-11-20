@@ -78,6 +78,48 @@
     return data.games[data.games.length - 1];
   }
 
+  /* ---------- Декор ---------- */
+
+  /* Плавающие буквы на фоне — лёгкое движение без влияния на игру */
+  function buildBackground() {
+    const host = document.getElementById("bg-letters");
+    if (!host) return;
+    const letters = "WORDLEÄÖÜAßÖ";
+    const colors = ["#3fa34d", "#ffce00", "#dd0000", "#ffffff"];
+    const rnd = (a, b) => a + Math.random() * (b - a);
+    for (let i = 0; i < 16; i++) {
+      const span = el("span", { text: letters[i % letters.length] });
+      span.style.setProperty("--x", rnd(0, 96).toFixed(1) + "%");
+      span.style.setProperty("--y", rnd(0, 96).toFixed(1) + "%");
+      span.style.setProperty("--s", Math.round(rnd(28, 96)) + "px");
+      span.style.setProperty("--o", (rnd(0.04, 0.09)).toFixed(3));
+      span.style.setProperty("--d", rnd(14, 28).toFixed(1) + "s");
+      span.style.setProperty("--dx", rnd(-60, 60).toFixed(0) + "px");
+      span.style.setProperty("--dy", rnd(-60, 60).toFixed(0) + "px");
+      span.style.setProperty("--r", rnd(-25, 25).toFixed(0) + "deg");
+      span.style.color = colors[i % colors.length];
+      host.appendChild(span);
+    }
+  }
+
+  /* Конфетти при победе: чистый CSS, снимается само через ~3.5 с */
+  function celebrate() {
+    const box = el("div", { class: "confetti", "aria-hidden": "true" });
+    const colors = ["#3fa34d", "#56c266", "#ffce00", "#dd0000", "#ffffff", "#4c8ff0"];
+    for (let i = 0; i < 90; i++) {
+      const piece = el("i");
+      piece.style.left = (Math.random() * 100).toFixed(1) + "%";
+      piece.style.background = colors[i % colors.length];
+      piece.style.setProperty("--t", (2.2 + Math.random() * 1.6).toFixed(2) + "s");
+      piece.style.setProperty("--sway", (Math.random() * 120 - 60).toFixed(0) + "px");
+      piece.style.setProperty("--spin", (Math.random() * 720 - 360).toFixed(0) + "deg");
+      piece.style.animationDelay = (Math.random() * 0.4).toFixed(2) + "s";
+      box.appendChild(piece);
+    }
+    document.body.appendChild(box);
+    setTimeout(() => box.remove(), 4000);
+  }
+
   /* ---------- Логика попытки ---------- */
 
   function submitGuess(game) {
@@ -116,6 +158,7 @@
     } else {
       render(); // игра окончена: показываем результат один раз
       showToast(game.status === "won" ? "Glückwunsch!" : "Leider verloren.");
+      if (game.status === "won") celebrate();
     }
   }
 
@@ -213,6 +256,7 @@
       class: "mode-card" + (primary ? " primary" : ""),
       onclick: () => newGame(mode),
     }, [
+      mode === "quordle" ? el("span", { class: "mode-badge", text: "4×" }) : null,
       modePreview(mode),
       el("div", { class: "mode-body" }, [
         el("div", { class: "mode-title", text: title }),
@@ -413,6 +457,7 @@
         el("p", { class: "muted", text: `${solved} von ${n} ${n > 1 ? "Wörtern" : "Wort"} in ${g.guesses.length} von ${g.maxAttempts} Versuchen erraten.` }),
       ]),
     ]));
+    box.appendChild(ringRow(g));
     box.appendChild(el("h2", { text: n > 1 ? "Lösungen & Bedeutung" : "Lösung & Bedeutung" }));
     g.answers.forEach((ans) => box.appendChild(buildExplanation(ans)));
     box.appendChild(el("div", { class: "btn-row" }, [
@@ -421,6 +466,22 @@
       el("a", { class: "btn", href: "#menu", text: "Menü" }),
     ]));
     return box;
+  }
+
+  /* Кольцо на каждое слово: заполнено, если угадано, с номером попытки */
+  function ringRow(g) {
+    const row = el("div", { class: "ring-row" });
+    g.answers.forEach((ans, i) => {
+      const at = g.solvedAt[i];
+      const solved = at !== null;
+      const ring = el("div", { class: "ring" }, [el("span", { text: solved ? String(at) : "–" })]);
+      ring.style.setProperty("--p", solved ? "100" : "0");
+      row.appendChild(el("div", { class: "ring-item" + (solved ? " solved" : "") }, [
+        ring,
+        el("div", { class: "ring-label", text: solved ? `${upper(ans)} · Versuch ${at}` : `${upper(ans)} · offen` }),
+      ]));
+    });
+    return row;
   }
 
   function buildExplanation(word) {
@@ -450,6 +511,49 @@
     return el("div", { class: "stat" }, [el("div", { class: "num", text: String(num) }), el("div", { class: "lbl", text: label })]);
   }
 
+  /* Гистограмма (на какой попытке угадано — как в Wordle) и спарклайн последних игр */
+  function statsCharts(finished) {
+    const wins = finished.filter((g) => g.mode === "wordle" && g.status === "won");
+    const counts = [];
+    for (let a = 1; a <= 6; a++) counts.push(wins.filter((g) => g.guesses.length === a).length);
+    const max = Math.max(1, ...counts);
+
+    const dist = el("div", { class: "dist" }, counts.map((c, i) => {
+      const bar = el("div", { class: "dist-bar" }, [
+        el("div", { class: c ? "" : "none", text: String(c) }),
+      ]);
+      bar.firstChild.style.setProperty("--w", ((c / max) * 100).toFixed(1) + "%");
+      return el("div", { class: "dist-row" }, [el("span", { text: String(i + 1) }), bar, el("span", { class: "muted", text: "" })]);
+    }));
+
+    const last = finished.slice(-12);
+    const spark = el("div", { class: "spark" }, last.map((g) => {
+      const total = g.answers.length;
+      const solved = g.solvedAt.filter((x) => x !== null).length;
+      const h = Math.max(6, Math.round((solved / total) * 100));
+      const bar = el("div", { class: "spark-bar " + g.mode });
+      bar.style.setProperty("--h", h + "%");
+      bar.title = `${modeLabel(g.mode)} · ${solved}/${total} gelöst · ${statusLabel(g.status)}`;
+      return el("div", { class: "spark-col" }, [bar, el("span", { class: "spark-lbl", text: modeLabel(g.mode).slice(0, 2) })]);
+    }));
+
+    return el("div", { class: "chart-grid", style: "margin-top:14px" }, [
+      el("div", { class: "card chart-card" }, [
+        el("h2", { text: "Wordle: Siege nach Versuchen" }),
+        counts.some((c) => c) ? dist : el("p", { class: "muted", text: "Noch keine Wordle-Siege." }),
+      ]),
+      el("div", { class: "card chart-card" }, [
+        el("h2", { text: "Letzte Spiele" }),
+        last.length ? spark : el("p", { class: "muted", text: "Noch keine beendeten Spiele." }),
+        el("div", { class: "legend" }, [
+          el("span", null, [el("i", { style: "background:#56c266" }), "Wordle"]),
+          el("span", null, [el("i", { style: "background:linear-gradient(180deg,#ffce00,#dd0000)" }), "Quordle"]),
+          el("span", { class: "muted", text: "Höhe = gelöste Wörter" }),
+        ]),
+      ]),
+    ]);
+  }
+
   function renderStats() {
     document.body.classList.remove("is-play");
     const finished = data.games.filter((g) => g.status === "won" || g.status === "lost");
@@ -476,6 +580,8 @@
       statBox(quordleDone.length, "Quordle beendet"),
       statBox(avg, "Ø Versuche (Wordle-Sieg)"),
     ]));
+
+    wrap.appendChild(statsCharts(finished));
 
     wrap.appendChild(el("h2", { text: "Alle Spiele" }));
     if (!data.games.length) {
@@ -602,4 +708,5 @@
   }
 
   init();
+  buildBackground();
 })();

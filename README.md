@@ -57,6 +57,7 @@ tests/               node:test
   разворачиваются по аффиксным правилам во все словоформы. Допустимые слова = все 5-буквенные формы.
 - **Частотность** (для выбора загаданных слов): FrequencyWords, hermitdave (MIT), основано на OpenSubtitles 2016 (de).
 - **Пояснения**: Wiktionary, de.wiktionary.org (CC BY-SA 4.0).
+- **Шрифт**: Inter (SIL Open Font License 1.1), файлы в `fonts/`, лицензия в `fonts/LICENSE-Inter.txt`.
 
 Пересборка списков слов:
 
