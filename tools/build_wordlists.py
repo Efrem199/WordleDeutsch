@@ -17,8 +17,8 @@ import json
 import os
 import unicodedata
 
-# ß is excluded: the on-screen keyboard uses the standard German QWERTZ layout (ÄÖÜ, no ß)
-LETTERS = re.compile(r"^[a-zäöü]{5}$")
+# Немецкий алфавит: a–z + ÄÖÜ + ß (ß есть на клавиатуре игры)
+LETTERS = re.compile(r"^[a-zäöüß]{5}$")
 
 
 def norm(w):

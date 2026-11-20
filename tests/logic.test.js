@@ -37,8 +37,9 @@ test("normalizeWord: нижний регистр и NFC", () => {
   assert.equal(L.normalizeWord("  TÜRME "), "türme");
 });
 
-test("isWellFormed: только 5 букв немецкого алфавита без ß", () => {
+test("isWellFormed: 5 букв немецкого алфавита, включая ß", () => {
   assert.ok(L.isWellFormed("bäume"));
+  assert.ok(L.isWellFormed("weißt"));
   assert.ok(!L.isWellFormed("weiß!"));
   assert.ok(!L.isWellFormed("heiß"));
   assert.ok(!L.isWellFormed("haus"));

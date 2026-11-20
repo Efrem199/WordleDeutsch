@@ -85,7 +85,7 @@
     const host = document.getElementById("bg-letters");
     if (!host) return;
     const letters = "WORDLEÄÖÜAßÖ";
-    const colors = ["#3fa34d", "#ffce00", "#dd0000", "#ffffff"];
+    const colors = ["#3fa34d", "#ffffff", "#8e94a3"];
     const rnd = (a, b) => a + Math.random() * (b - a);
     for (let i = 0; i < 16; i++) {
       const span = el("span", { text: letters[i % letters.length] });
@@ -105,7 +105,7 @@
   /* Конфетти при победе: чистый CSS, снимается само через ~3.5 с */
   function celebrate() {
     const box = el("div", { class: "confetti", "aria-hidden": "true" });
-    const colors = ["#3fa34d", "#56c266", "#ffce00", "#dd0000", "#ffffff", "#4c8ff0"];
+    const colors = ["#3fa34d", "#56c266", "#e9c46a", "#ffffff", "#4c8ff0", "#8e94a3"];
     for (let i = 0; i < 90; i++) {
       const piece = el("i");
       piece.style.left = (Math.random() * 100).toFixed(1) + "%";
@@ -372,8 +372,11 @@
               if (fresh) cls.push("reveal");
               if (win) cls.push("win");
               const t = el("div", { class: cls.join(" "), text: L.displayLetter(ch) });
-              if (fresh) t.style.animationDelay = `${i * 0.15}s`;
-              if (win) t.style.animationDelay = `${0.75 + i * 0.09}s`;
+              if (fresh) {
+                // Задержки по колонкам: переворот, смена цвета (и подпрыгивание у угаданного слова)
+                const d = (i * 0.15).toFixed(2);
+                t.style.animationDelay = win ? `${d}s, ${d}s, ${(i * 0.15 + 0.5).toFixed(2)}s` : `${d}s, ${d}s`;
+              }
               row.appendChild(t);
             });
           } else {
@@ -414,7 +417,7 @@
     KEYBOARD_ROWS.forEach((keys, idx) => {
       const row = el("div", { class: "kb-row" });
       if (idx === 2) row.appendChild(el("button", { class: "key wide", text: "Enter", "data-key": "Enter", onclick: () => handleKey("Enter") }));
-      keys.forEach((k) => row.appendChild(el("button", { class: "key", text: k, "data-key": k, onclick: () => handleKey(k) })));
+      keys.forEach((k) => row.appendChild(el("button", { class: "key", text: k === "ß" ? "ẞ" : k, "data-key": k, onclick: () => handleKey(k) })));
       if (idx === 2) row.appendChild(el("button", { class: "key wide", text: "⌫", "data-key": "Backspace", "aria-label": "Löschen", onclick: () => handleKey("Backspace") }));
       kb.appendChild(row);
     });
@@ -489,10 +492,14 @@
       el("span", { class: "word", text: upper(word) }),
       el("span", { class: "muted small", text: "  lädt Bedeutung …" }),
     ]);
-    EX.getExplanation(word).then((r) => {
+    Promise.all([
+      EX.getExplanation(word),
+      EX.getWikiImage(word).catch(() => null),
+    ]).then(([r, img]) => {
       holder.innerHTML = "";
       holder.appendChild(el("span", { class: "word", text: upper(word) }));
       if (r.wortart) holder.appendChild(el("span", { class: "pos", text: r.wortart }));
+      if (img) holder.appendChild(imageBlock(img));
       if (r.ok) {
         const ol = el("ol");
         r.defs.forEach((d) => ol.appendChild(el("li", { text: d })));
@@ -503,6 +510,49 @@
       holder.appendChild(el("a", { href: r.url, target: "_blank", rel: "noopener", text: "Wiktionary ↗" }));
     });
     return holder;
+  }
+
+  /* Картинка из Википедии: миниатюра, по клику — увеличенный просмотр с подписью */
+  function imageBlock(img) {
+    return el("figure", { class: "ex-fig" }, [
+      el("button", { class: "ex-img", type: "button", "aria-label": "Bild vergrößern", onclick: () => openLightbox(img) }, [
+        el("img", { src: img.thumb, alt: img.title, loading: "lazy" }),
+      ]),
+      el("figcaption", { class: "ex-cap" }, [
+        el("div", { class: "ex-cap-title", text: img.title }),
+        img.description ? el("div", { class: "muted small", text: img.description }) : null,
+        el("a", { href: img.page, target: "_blank", rel: "noopener", text: "Wikipedia ↗" }),
+      ]),
+    ]);
+  }
+
+  function openLightbox(img) {
+    const onKey = (e) => { if (e.key === "Escape") close(); };
+    let box = null;
+    function close() {
+      document.removeEventListener("keydown", onKey);
+      if (box) box.remove();
+      box = null;
+    }
+    box = el("div", {
+      class: "lightbox",
+      role: "dialog",
+      "aria-modal": "true",
+      "aria-label": img.title,
+      onclick: (e) => { if (e.target === box) close(); },
+    }, [
+      el("div", { class: "lb-inner" }, [
+        el("button", { class: "lb-close", type: "button", "aria-label": "Schließen", text: "✕", onclick: close }),
+        el("img", { src: img.full, alt: img.title }),
+        el("div", { class: "lb-caption" }, [
+          el("strong", { text: img.title }),
+          img.description ? el("span", { text: " – " + img.description }) : null,
+          el("div", { class: "lb-src" }, [el("a", { href: img.page, target: "_blank", rel: "noopener", text: "Quelle: Wikipedia ↗" })]),
+        ]),
+      ]),
+    ]);
+    document.body.appendChild(box);
+    document.addEventListener("keydown", onKey);
   }
 
   /* ---------- Статистика и история ---------- */
@@ -547,7 +597,7 @@
         last.length ? spark : el("p", { class: "muted", text: "Noch keine beendeten Spiele." }),
         el("div", { class: "legend" }, [
           el("span", null, [el("i", { style: "background:#56c266" }), "Wordle"]),
-          el("span", null, [el("i", { style: "background:linear-gradient(180deg,#ffce00,#dd0000)" }), "Quordle"]),
+          el("span", null, [el("i", { style: "background:linear-gradient(180deg,#e9c46a,#b08a3a)" }), "Quordle"]),
           el("span", { class: "muted", text: "Höhe = gelöste Wörter" }),
         ]),
       ]),
@@ -684,7 +734,7 @@
     if (!g) return;
     if (e.key === "Enter") { e.preventDefault(); return handleKey("Enter"); }
     if (e.key === "Backspace") { e.preventDefault(); return handleKey("Backspace"); }
-    if (/^[a-zA-ZäöüÄÖÜ]$/.test(e.key)) { e.preventDefault(); handleKey(e.key); }
+    if (/^[a-zA-ZäöüÄÖÜß]$/.test(e.key)) { e.preventDefault(); handleKey(e.key); }
   });
 
   window.addEventListener("hashchange", render);
