@@ -120,6 +120,11 @@ test("Quordle keys show four independent results and mobile shows the selected b
   await page.goto("/");
   await play(page, "quordle");
   await expect(page.locator(".board:visible")).toHaveCount(4);
+  const keyboard = await page.locator("#keyboard").boundingBox();
+  for (const board of await page.locator(".board").all()) {
+    const box = await board.boundingBox();
+    expect(box.y + box.height).toBeLessThan(keyboard.y);
+  }
   await guess(page, "tisch");
   await expect(page.getByText("Versuch 2 von 9")).toBeVisible();
   const answers = (await save(page)).games[0].answers;
@@ -128,9 +133,13 @@ test("Quordle keys show four independent results and mobile shows the selected b
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator(".board:visible")).toHaveCount(1);
+  await page.getByRole("button", { name: "Alle vier Wörter anzeigen" }).click();
+  await expect(page.locator(".board:visible")).toHaveCount(4);
+  await expect(page.locator(".board-hint i[class]").first()).toBeVisible();
   await page.locator('.play-pick [data-board-pick="2"]').click();
   await expect(page.locator('[data-board="2"]')).toBeVisible();
   await expect(page.locator('[data-board="0"]')).toBeHidden();
+  await expect(page.getByRole("button", { name: "Alle vier Wörter anzeigen" })).toHaveAttribute("aria-pressed", "false");
   await guess(page, "lerne");
   await expect(page.getByText("Versuch 3 von 9")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
@@ -143,6 +152,17 @@ test("free play works when the daily word list is unavailable", async ({ page })
   await expect(page.getByText("Das Tagesrätsel konnte nicht geladen werden.")).toBeVisible();
   await play(page, "wordle");
   await expect(page.getByText("Versuch 1 von 6")).toBeVisible();
+});
+
+test("on a phone, free play stays above the daily choices and navigation stays at the bottom", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Freies Spiel" })).toBeVisible();
+  const free = await page.locator(".free-panel").boundingBox();
+  const daily = await page.locator(".daily-panel").boundingBox();
+  const nav = await page.locator(".topnav").boundingBox();
+  expect(free.y + free.height).toBeLessThan(daily.y);
+  expect(nav.y + nav.height).toBeCloseTo(844, 0);
 });
 
 test("word cards show grammar, play the recording, and remember the word after reload", async ({ page }) => {
@@ -231,7 +251,7 @@ test("Quordle resumes after reload and its history hides the solutions while pla
 
   await page.locator('.play-bar a[href="#menu"]').click();
   await page.locator('.topnav a[href="#stats"]').click();
-  await page.locator("summary").click();
+  await page.locator(".history-entry summary").click();
   await expect(page.getByText("Versuch 1: 0 von 4 Wörtern gelöst", { exact: false })).toBeVisible();
   await expect(page.getByText(/^Wörter:/)).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Bedeutungen anzeigen" })).toHaveCount(0);
@@ -305,11 +325,11 @@ test("definitions appear independently of images and are available in finished h
   await expect(page.locator(".explain li")).toHaveText("Möbelstück", { timeout: 4000 });
 
   await page.locator('.topnav a[href="#stats"]').click();
-  await page.locator("summary").click();
+  await page.locator(".history-entry summary").click();
   await expect(page.getByText("Wörter: TISCH (Versuch 1)")).toBeVisible();
   await page.getByRole("button", { name: "Bedeutungen anzeigen" }).click();
   await expect(page.locator(".explain li")).toBeVisible();
-  await page.locator("summary").click();
+  await page.locator(".history-entry summary").click();
   await expect(page.locator(".explain li")).toBeHidden();
   unblock();
 });
