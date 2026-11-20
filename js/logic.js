@@ -27,13 +27,23 @@
   const RESULT = { CORRECT: "correct", PRESENT: "present", ABSENT: "absent" };
   const DAY_MS = 86400000;
   const DAILY_EPOCH = Date.UTC(2026, 10, 20);
+  const DAILY_TIME_ZONE = "Europe/Berlin";
   const dailyCalendar = new Intl.DateTimeFormat("en", {
-    timeZone: "Europe/Berlin", year: "numeric", month: "2-digit", day: "2-digit",
+    timeZone: DAILY_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit",
+  });
+  const dailyClock = new Intl.DateTimeFormat("en-GB", {
+    timeZone: DAILY_TIME_ZONE, hour: "2-digit", minute: "2-digit", hourCycle: "h23",
   });
 
   function dailyDate(now = new Date()) {
     const parts = Object.fromEntries(dailyCalendar.formatToParts(now).map(({ type, value }) => [type, value]));
     return `${parts.year}-${parts.month}-${parts.day}`;
+  }
+
+  function nextDailyReset(now = new Date()) {
+    const tomorrowUtc = Date.parse(dailyDate(now) + "T00:00:00Z") + DAY_MS;
+    const [hours, minutes] = dailyClock.format(tomorrowUtc).split(":").map(Number);
+    return new Date(tomorrowUtc - (hours * 60 + minutes) * 60_000);
   }
 
   function dailyWords(pool, mode, date) {
@@ -179,7 +189,9 @@
     isWellFormed,
     evaluateGuess,
     pickWords,
+    DAILY_TIME_ZONE,
     dailyDate,
+    nextDailyReset,
     dailyWords,
     dailyShareText,
     keyboardStatuses,
