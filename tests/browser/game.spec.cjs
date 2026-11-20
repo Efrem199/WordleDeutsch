@@ -170,6 +170,21 @@ test("on a phone, free play stays above the daily choices and navigation stays a
   expect(nav.y + nav.height).toBeCloseTo(844, 0);
 });
 
+test("floating background letters respect reduced motion and never capture clicks", async ({ page }) => {
+  await page.goto("/");
+  const background = page.locator(".bg-letters");
+  const letters = background.locator("span");
+  await expect(background).toHaveAttribute("aria-hidden", "true");
+  await expect(background).toHaveCSS("pointer-events", "none");
+  await expect(letters).toHaveCount(16);
+  await expect(letters.first()).toHaveCSS("animation-name", "drift-letter");
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(letters.first()).toHaveCSS("animation-name", "none");
+  await play(page, "wordle");
+  await expect(page.getByText("Versuch 1 von 6")).toBeVisible();
+});
+
 test("word cards show grammar, play the recording, and remember the word after reload", async ({ page }) => {
   const audio = "https://upload.wikimedia.org/wikipedia/commons/e/e9/De-Tisch.ogg";
   await seedFinishedWordle(page, "tisch");
