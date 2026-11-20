@@ -647,11 +647,19 @@
         });
         const explBox = el("div", { class: "word-list" });
         const exRow = el("tr", { class: "ex-row", hidden: true }, [el("td", { colspan: "5" }, [explBox])]);
+        let explBuilt = false;
+        let explOpen = false;
+        // Строка пояснений видна, только если пояснения открыты и «Verlauf» раскрыт
+        const syncExplRow = () => { exRow.hidden = !(explOpen && details.open); };
         const explBtn = el("button", { class: "btn small", text: "Bedeutungen anzeigen" });
         explBtn.addEventListener("click", () => {
-          explBtn.remove();
-          exRow.hidden = false;
-          g.answers.forEach((w) => explBox.appendChild(buildExplanation(w)));
+          if (!explBuilt) {
+            explBuilt = true;
+            g.answers.forEach((w) => explBox.appendChild(buildExplanation(w)));
+          }
+          explOpen = !explOpen;
+          explBtn.textContent = explOpen ? "Bedeutungen ausblenden" : "Bedeutungen anzeigen";
+          syncExplRow();
         });
         const words = el("div", { class: "muted small", text: "Wörter: " + g.answers.map((w, i) =>
           `${upper(w)}${g.solvedAt[i] !== null ? " (Versuch " + g.solvedAt[i] + ")" : " (nicht gelöst)"}`).join(", ") });
@@ -668,6 +676,7 @@
           el("td", { "data-label": "Gelöst", text: `${solved}/${g.answers.length} · ${g.guesses.length}/${g.maxAttempts}` }),
           el("td", { "data-label": "Details" }, [details]),
         ]));
+        details.addEventListener("toggle", syncExplRow);
         tbody.appendChild(exRow);
       });
       wrap.appendChild(el("div", { class: "table-wrap" }, [
