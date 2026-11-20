@@ -1129,5 +1129,29 @@
     if (!["#stats", "#rules", "#vocab"].includes(location.hash)) render();
   }
 
+  function buildBackground() {
+    const background = document.getElementById("bg-letters");
+    if (!background) return;
+    const letters = [..."WORDLEÄÖÜẞQAT"];
+    const random = (min, max) => Math.random() * (max - min) + min;
+    for (let i = 0; i < 16; i++) {
+      const letter = el("span", { text: letters[i % letters.length] });
+      const properties = {
+        "--x": random(0, 96).toFixed(1) + "%",
+        "--y": random(0, 96).toFixed(1) + "%",
+        "--size": Math.round(random(28, 96)) + "px",
+        "--opacity": random(.04, .09).toFixed(3),
+        "--duration": random(14, 28).toFixed(1) + "s",
+        "--phase": random(-12, 0).toFixed(1) + "s",
+        "--dx": Math.round(random(-60, 60)) + "px",
+        "--dy": Math.round(random(-60, 60)) + "px",
+        "--angle": Math.round(random(-25, 25)) + "deg",
+      };
+      for (const [property, value] of Object.entries(properties)) letter.style.setProperty(property, value);
+      background.appendChild(letter);
+    }
+  }
+
+  buildBackground();
   init();
 })();
