@@ -110,8 +110,11 @@
     }
     input = "";
     saveData();
-    render();
-    if (game.status !== "playing") {
+    if (game.status === "playing") {
+      // Во время игры обновляем только доски и клавиатуру — без перестройки всего экрана
+      drawBoards(game);
+    } else {
+      render(); // игра окончена: показываем результат один раз
       showToast(game.status === "won" ? "Glückwunsch!" : "Leider verloren.");
     }
   }
@@ -258,7 +261,7 @@
     const n = g.answers.length;
     document.body.classList.toggle("is-play", playing);
 
-    const view = el("div", { class: "view view-play" });
+    const view = el("div", { class: "view-play" });
     view.appendChild(el("div", { class: "play-bar" }, [
       el("a", { class: "icon-btn", href: "#menu", text: "‹ Menü" }),
       el("div", { class: "play-info" }, [
