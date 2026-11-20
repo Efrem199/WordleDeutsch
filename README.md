@@ -22,7 +22,7 @@
 Сайт публикуется через GitHub Pages (workflow `.github/workflows/pages.yml` при каждом пуше в `main`):
 https://efrem199.github.io/WordleDeutsch/
 
-Для публикации в Settings → Pages источник должен быть «GitHub Actions» (workflow включает Pages сам, если это разрешено).
+Один раз нужно включить Pages вручную: Settings → Pages → Source → «GitHub Actions». Без этого деплой упадёт на шаге `configure-pages`.
 
 ## Запуск
 
