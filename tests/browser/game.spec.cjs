@@ -220,6 +220,56 @@ test.describe("landscape phone", () => {
       expect((await save(page)).games[0].guesses[0].word).toBe("tisch");
     });
   }
+
+  test("Wordle shows the solution alongside the result immediately after a win", async ({ context, page }) => {
+    await installExternalFixtures(context);
+    await page.setViewportSize({ width: 748, height: 296 });
+    await page.clock.setFixedTime(new Date("2026-11-21T12:00:00Z"));
+    await page.goto("/");
+    await page.locator(".daily-card").filter({ hasText: "Wordle" }).tap();
+    const keyboard = page.locator("#keyboard");
+    for (const letter of "dunst") await keyboard.locator(`[data-key="${letter}"]`).tap();
+    await keyboard.locator('[data-key="Enter"]').tap();
+
+    const result = page.locator(".result-summary");
+    const solutions = page.locator(".result-words");
+    await expect(result.getByRole("heading", { name: "Geschafft!" })).toBeInViewport({ ratio: 1 });
+    await expect(solutions.getByRole("heading", { name: "Dunst" })).toBeInViewport({ ratio: 1 });
+    await expect(solutions.getByText("Möbelstück")).toBeInViewport({ ratio: 1 });
+    const summaryBox = await result.boundingBox();
+    const solutionsBox = await solutions.boundingBox();
+    expect(summaryBox.y).toBeCloseTo(solutionsBox.y);
+    expect(summaryBox.x + summaryBox.width).toBeLessThan(solutionsBox.x);
+    await expect(result.getByRole("button", { name: "Ergebnis kopieren" })).toBeInViewport({ ratio: 1 });
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    const portraitSummary = await result.boundingBox();
+    const portraitSolutions = await solutions.boundingBox();
+    expect(portraitSummary.y + portraitSummary.height).toBeLessThan(portraitSolutions.y);
+    await solutions.getByRole("button", { name: "Merken", exact: true }).tap();
+    await expect(solutions.getByRole("button", { name: "Gemerkt" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  test("Quordle lays out solution cards side by side and can still open the replay", async ({ context, page }) => {
+    await installExternalFixtures(context);
+    await page.addInitScript(({ key, answers }) => {
+      localStorage.setItem(key, JSON.stringify({ version: 1, used: answers, games: [{
+        id: "finished", status: "lost", mode: "quordle", startedAt: new Date().toISOString(),
+        maxAttempts: 9, answers, solvedAt: [null, null, null, null], guesses: [], progress: [],
+      }] }));
+    }, { key: storageKey, answers: quorum });
+    await page.goto("/#play/finished");
+    const cards = page.locator(".result-words .explain");
+    await expect(cards).toHaveCount(4);
+    await expect(cards.nth(1).getByRole("heading")).toBeInViewport({ ratio: 1 });
+    const first = await cards.first().boundingBox();
+    const second = await cards.nth(1).boundingBox();
+    expect(first.y).toBeCloseTo(second.y);
+    expect(first.x + first.width).toBeLessThan(second.x);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(844);
+    await page.locator(".result-review summary").tap();
+    await expect(page.locator(".replay-pick")).toBeVisible();
+  });
 });
 
 test("free play works when the daily word list is unavailable", async ({ page }) => {

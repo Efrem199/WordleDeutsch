@@ -401,8 +401,9 @@ h3 { font-size: 16px; }
 
 /* Results, word cards and history */
 .result { display: grid; gap: 14px; padding-top: 15px; }
-.result-head p { margin-top: 6px; }
-.result .btn-row { margin-top: 0; }
+.result-summary { display: grid; gap: 6px; min-width: 0; }
+.result-summary .btn-row { margin-top: 8px; }
+.result-summary .share-result { min-width: 0; }
 .result-words h2 { margin-bottom: 10px; }
 .word-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 310px), 1fr)); gap: 10px; }
 .explain {
@@ -758,6 +759,38 @@ h3 { font-size: 16px; }
   .is-play .keyboard { width: min(100%, 560px); }
   .is-play .key { height: clamp(36px, 13dvh, 52px); touch-action: manipulation; }
   .is-play .toast { bottom: calc(8px + env(safe-area-inset-bottom)); }
+
+  @media (min-width: 500px) {
+    #app:has(.view-result) { padding-top: 6px; }
+    .view-result { gap: 7px; }
+    .view-result .play-bar { min-height: 38px; border-bottom: 1px solid var(--border); }
+    .result {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 2.15fr);
+      align-items: start;
+      gap: 10px clamp(10px, 2vw, 18px);
+      padding-top: 0;
+    }
+    .result-summary {
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+    }
+    .result-summary h1 { font-size: clamp(22px, 4vw, 34px); }
+    .result-summary .btn { padding-inline: 10px; font-size: .79rem; }
+    .result-words { min-width: 0; }
+    .result-words h2 { margin-bottom: 6px; }
+    .result-words .word-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 215px), 1fr)); }
+    .result-words .explain { padding: 10px 12px; gap: 8px; overflow-wrap: anywhere; }
+    .result-words .word-grid > .explain:only-child:has(.ex-fig) {
+      grid-template-columns: minmax(0, 1fr) minmax(68px, 27%);
+    }
+    .result-words .explain:only-child .word-head { grid-column: 1 / -1; }
+    .result-words .explain:only-child .ex-fig { grid-column: 2; grid-row: 2; align-self: start; display: grid; }
+    .result-words .explain:only-child .word-definition { grid-column: 1; grid-row: 2; }
+    .result-words .explain:only-child .ex-img { width: 100%; height: auto; aspect-ratio: 4 / 3; }
+    .result-review { grid-column: 1 / -1; }
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

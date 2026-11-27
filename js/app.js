@@ -424,7 +424,7 @@
     const n = g.answers.length;
     document.body.classList.toggle("is-play", playing);
 
-    const view = el("div", { class: "view-play" + (playing && n > 1 ? " is-quordle" : "") });
+    const view = el("div", { class: playing ? "view-play" + (n > 1 ? " is-quordle" : "") : "view-play view-result" });
     view.appendChild(el("div", { class: "play-bar" }, [
       el("a", { class: "icon-btn", href: "#menu", text: "‹ Menü" }),
       el("div", { class: "play-info" }, [
@@ -670,19 +670,20 @@
     const won = g.status === "won";
     const n = g.answers.length;
     const box = el("section", { class: "result" });
-    box.appendChild(el("div", { class: "result-head" }, [
+    const summary = el("div", { class: "result-summary" }, [
       el("h1", { text: won ? "Geschafft!" : g.status === "aborted" ? "Runde abgebrochen" : "Schade, das war’s." }),
       el("p", { class: "muted", text: (n > 1 ? `${solved} von ${n} Wörtern · ` : "") +
         `${g.guesses.length} von ${g.maxAttempts} Versuchen` }),
-    ]));
+    ]);
     const share = g.dailyDate ? el("textarea", { class: "share-result", readonly: true, hidden: true,
       rows: 6, "aria-label": "Ergebnis zum Kopieren" }) : null;
-    box.appendChild(el("div", { class: "btn-row" }, [
+    summary.appendChild(el("div", { class: "btn-row" }, [
       g.dailyDate ? el("button", { class: "btn primary", text: "Ergebnis kopieren", onclick: () => copyDailyResult(g, share) }) : null,
       el("button", { class: g.dailyDate ? "btn" : "btn primary", text: g.dailyDate ? "Freies Spiel" : "Neue Runde", onclick: () => newGame(g.mode) }),
       el("a", { class: "btn", href: "#stats", text: "Verlauf" }),
     ]));
-    if (share) box.appendChild(share);
+    if (share) summary.appendChild(share);
+    box.appendChild(summary);
     box.appendChild(el("section", { class: "result-words" }, [
       el("h2", { text: n > 1 ? "Lösungen" : "Lösung" }),
       el("div", { class: "word-grid" }, g.answers.map((ans, index) =>
@@ -747,7 +748,7 @@
     const mark = el("button", { class: "btn small", type: "button", "data-save-word": word, onclick: () => toggleSavedWord(word) });
     updateSaveButton(mark);
     actions.appendChild(mark);
-    const content = el("div", null, [el("span", { class: "muted small", text: "lädt Bedeutung …" })]);
+    const content = el("div", { class: "word-definition" }, [el("span", { class: "muted small", text: "lädt Bedeutung …" })]);
     const holder = el("article", { class: "explain" }, [
       el("header", { class: "word-head" }, [
         el("div", null, [meta ? el("p", { class: "word-meta", text: meta }) : null, title, plural]),
