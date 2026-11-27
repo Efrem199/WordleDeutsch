@@ -29,7 +29,8 @@
   let submitting = false;
   let selectedBoard = 0;
   let showOverview = false;
-  const mobileBoards = window.matchMedia("(max-width: 700px)");
+  const landscapePlay = window.matchMedia("(orientation: landscape) and (max-height: 500px) and (max-width: 1100px)");
+  const compactBoards = window.matchMedia("(max-width: 700px), " + landscapePlay.media);
   let visibleGameId = null;
 
   /* ---------- Хранение ---------- */
@@ -440,6 +441,7 @@
       return;
     }
 
+    const controls = el("div", { class: "play-controls" });
     if (n > 1) {
       const select = (index) => {
         selectedBoard = index;
@@ -450,7 +452,7 @@
           scrollToBoard(latest);
         }
       };
-      view.appendChild(el("div", { class: "quordle-nav" }, [
+      controls.appendChild(el("div", { class: "quordle-nav" }, [
         boardPicker(g, selectedBoard, select, "play-pick"),
         el("button", { type: "button", class: "overview-toggle", "aria-pressed": showOverview,
           "aria-label": "Alle vier Wörter anzeigen", text: "Alle", onclick: () => {
@@ -468,7 +470,8 @@
     scroll.appendChild(el("div", { id: "boards", class: "boards " + (n > 1 ? "quad" : "single") }));
     view.appendChild(scroll);
 
-    view.appendChild(el("div", { class: "keyboard-dock" }, [buildKeyboard(n)]));
+    controls.appendChild(el("div", { class: "keyboard-dock" }, [buildKeyboard(n)]));
+    view.appendChild(controls);
     setView(view);
     drawBoards(g);
     scrollToBoard(g);
@@ -505,7 +508,7 @@
   }
 
   function scrollToBoard(game) {
-    if (game.mode === "quordle" && (!mobileBoards.matches || showOverview)) return;
+    if (game.mode === "quordle" && (!compactBoards.matches || showOverview)) return;
     requestAnimationFrame(() => {
       if (routedGame()?.id !== game.id) return;
       const board = document.querySelector(`#boards [data-board="${selectedBoard}"]`);
@@ -516,7 +519,7 @@
   function drawBoards(g) {
     const boards = document.getElementById("boards");
     if (!boards) return;
-    const overview = mobileBoards.matches && showOverview;
+    const overview = compactBoards.matches && showOverview;
     boards.classList.toggle("show-overview", overview);
     document.querySelector(".overview-toggle")?.setAttribute("aria-pressed", overview);
     const isPlaying = g.status === "playing";
@@ -1136,9 +1139,13 @@
   });
 
   window.addEventListener("hashchange", render);
-  mobileBoards.addEventListener("change", () => {
+  compactBoards.addEventListener("change", () => {
     const game = playingGame();
     if (game?.mode === "quordle") drawBoards(game);
+  });
+  landscapePlay.addEventListener("change", () => {
+    const game = playingGame();
+    if (game) scrollToBoard(game);
   });
   function refreshMenuDate() {
     if (dictionaryState === "ready" && (!location.hash || location.hash === "#menu") && menuDay !== L.dailyDate()) renderMenu();

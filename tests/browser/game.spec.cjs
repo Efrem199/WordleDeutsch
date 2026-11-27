@@ -173,6 +173,55 @@ test("Quordle keys show four independent results and mobile shows the selected b
   await expect(page.locator(".board:visible")).toHaveCount(4);
 });
 
+test.describe("landscape phone", () => {
+  test.use({ viewport: { width: 844, height: 390 }, isMobile: true, hasTouch: true });
+
+  for (const mode of ["wordle", "quordle"]) {
+    test(`${mode} keeps the field and touch keyboard usable when the phone rotates`, async ({ page }) => {
+      await page.route("**/data/answers.json", (route) => route.fulfill({ json: quorum }));
+      await page.setViewportSize({ width: 568, height: 320 });
+      await page.goto("/");
+      await expect(page.locator(".daily-card").last()).toBeInViewport({ ratio: 1 });
+      await page.locator(".mode-card").filter({ hasText: words[mode] }).tap();
+
+      const selected = page.locator(".board.is-selected");
+      const keyboard = page.locator("#keyboard");
+      if (mode === "quordle") {
+        await expect(page.locator(".board:visible")).toHaveCount(1);
+        await page.locator('[data-board-pick="2"]').tap();
+        await expect(selected).toHaveAttribute("data-board", "2");
+        await page.getByRole("button", { name: "Alle vier Wörter anzeigen" }).tap();
+        await expect(page.locator(".board:visible")).toHaveCount(4);
+        await page.locator('[data-board-pick="2"]').tap();
+      }
+
+      for (const { width, height } of [{ width: 844, height: 390 }, { width: 568, height: 320 }]) {
+        await page.setViewportSize({ width, height });
+        await expect(page.locator(".topbar")).toBeHidden();
+        await expect(selected.locator(".tile").last()).toBeInViewport({ ratio: 1 });
+        const board = await selected.boundingBox();
+        const keys = await keyboard.boundingBox();
+        expect(board.x + board.width).toBeLessThan(keys.x);
+        expect(keys.y + keys.height).toBeLessThanOrEqual(height);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+      }
+
+      for (const letter of "tis") await keyboard.locator(`[data-key="${letter}"]`).tap();
+      await page.setViewportSize({ width: 390, height: 844 });
+      await expect(selected.locator(".row.current")).toHaveText("TIS");
+      if (mode === "quordle") await expect(selected).toHaveAttribute("data-board", "2");
+      const board = await selected.boundingBox();
+      const keys = await keyboard.boundingBox();
+      expect(board.y + board.height).toBeLessThan(keys.y);
+      await page.setViewportSize({ width: 844, height: 390 });
+      for (const letter of "ch") await keyboard.locator(`[data-key="${letter}"]`).tap();
+      await keyboard.locator('[data-key="Enter"]').tap();
+      await expect(page.getByText(`Versuch 2 von ${mode === "wordle" ? 6 : 9}`)).toBeVisible();
+      expect((await save(page)).games[0].guesses[0].word).toBe("tisch");
+    });
+  }
+});
+
 test("free play works when the daily word list is unavailable", async ({ page }) => {
   await page.route("**/data/daily-words.json", (route) => route.fulfill({ status: 503 }));
   await page.goto("/");
